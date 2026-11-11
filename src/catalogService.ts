@@ -22,6 +22,8 @@ async function cache(titles: Movie[]) {
     const old = previous[i];
     if (!old) return m;
     return { ...old, ...m,
+      year: m.year ?? old.year,
+      publicRating: m.publicRating ?? old.publicRating,
       genres: m.genres.length ? m.genres : old.genres,
       director: m.director || old.director,
       directors: m.directors?.length ? m.directors : old.directors,
@@ -107,16 +109,21 @@ export async function discoverPage(
   genre: string,
   title: string,
   page: number,
+  required: { year: boolean; rating: boolean },
 ) {
   if (title) {
     // Search and hydrate by title before applying the local genre filter.
     const titles = await searchCatalog(title, page * 40);
-    if (!genre) return titles;
-    // Search results can omit genres. Resolve those before filtering the deck.
+    if (!genre && !required.year && !required.rating) return titles;
+    // Search results can omit facts needed by filters. Resolve those in small batches.
     for (let offset = 0; offset < titles.length; offset += 6) {
       const batch = titles.slice(offset, offset + 6);
       const full = await Promise.all(batch.map((movie) =>
-        (!type || movie.mediaType === type) && !movie.genres.length ? ensureTitle(movie) : movie,
+        (!type || movie.mediaType === type) && (
+          (genre && !movie.genres.length) ||
+          (required.year && movie.year === null) ||
+          (required.rating && !movie.publicRating)
+        ) ? ensureTitle(movie) : movie,
       ));
       titles.splice(offset, batch.length, ...full);
     }

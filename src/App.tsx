@@ -48,6 +48,29 @@ const sections = [
   { id: "for-you", label: "For You", icon: Aperture },
 ] as const;
 type Section = (typeof sections)[number]["id"];
+type DiscoverOrder = "recommended" | "newest" | "imdb";
+function MovieFacts({ movie }: { movie: Movie }) {
+  return (
+    <>
+      <h2>{movie.title}</h2>
+      <p className="metadata">
+        {[
+          movie.year ?? "Year unknown",
+          movie.mediaType === "movie" ? "Film" : "TV series",
+          movie.runtime && movie.runtime !== "TV series" ? movie.runtime : null,
+        ].filter(Boolean).join(" · ")}
+      </p>
+      <p className="genres">{movie.genres.join(", ")}</p>
+      {movie.publicRating && (
+        <p className="metadata">
+          IMDb {movie.publicRating.value.toFixed(1)}
+          {movie.publicRating.votes !== undefined && ` · ${movie.publicRating.votes.toLocaleString()} votes`}
+        </p>
+      )}
+    </>
+  );
+}
+
 export default function App() {
   const [page, setPage] = useState<Section>("discover");
   const [movies, setMovies] = useState<Movie[]>([]);
@@ -78,6 +101,10 @@ export default function App() {
   const [titleFilter, setTitleFilter] = useState("");
   const [genreFilter, setGenreFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState<"" | "movie" | "tv">("");
+  const [minimumRating, setMinimumRating] = useState("");
+  const [yearFrom, setYearFrom] = useState("");
+  const [yearTo, setYearTo] = useState("");
+  const [discoverOrder, setDiscoverOrder] = useState<DiscoverOrder>("recommended");
   const [filterPage, setFilterPage] = useState(0);
   const [filterLoading, setFilterLoading] = useState(false);
   const [filterError, setFilterError] = useState(false);
@@ -87,23 +114,35 @@ export default function App() {
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [drag, setDrag] = useState(0);
   const [exit, setExit] = useState(0);
-  const pointer = useRef<{ id: number; x: number; y: number; poster: boolean; moved: boolean } | null>(null);
+  const pointer = useRef<{ id: number; x: number; y: number; scrollable: boolean; moved: boolean } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ranked = useMemo(() => recommend(movies, entries), [movies, entries]);
   const profile = useMemo(
     () => buildTasteProfile(movies, entries),
     [movies, entries],
   );
-  const hasFilters = Boolean(titleFilter.trim() || genreFilter || typeFilter);
+  const firstYear = /^\d{4}$/.test(yearFrom) ? Number(yearFrom) : 0;
+  const lastYear = /^\d{4}$/.test(yearTo) ? Number(yearTo) : 0;
+  const invalidYears = Boolean(firstYear && lastYear && firstYear > lastYear);
+  const filterByYear = !invalidYears && Boolean(firstYear || lastYear);
+  const hasFilters = Boolean(titleFilter.trim() || genreFilter || typeFilter || minimumRating || filterByYear);
   function matchesFilters(movie: Movie) {
     return (!titleFilter.trim() || movie.title.toLocaleLowerCase().includes(titleFilter.trim().toLocaleLowerCase())) &&
       (!genreFilter || movie.genres.includes(genreFilter)) &&
-      (!typeFilter || movie.mediaType === typeFilter);
+      (!typeFilter || movie.mediaType === typeFilter) &&
+      (!minimumRating || (movie.publicRating?.value ?? 0) >= Number(minimumRating)) &&
+      (!filterByYear || (movie.year !== null && (!firstYear || movie.year >= firstYear) && (!lastYear || movie.year <= lastYear)));
   }
-  const discoverRanked = hasFilters ? recommend(movies.filter(matchesFilters), entries) : ranked;
+  const discoverPool = hasFilters ? movies.filter(matchesFilters) : movies;
+  const discoverRanked = hasFilters && discoverOrder === "recommended" ? recommend(discoverPool, entries) : ranked;
+  const reviewed = new Set(entries.map((entry) => entry.movieId));
+  const nextMovie = discoverOrder === "recommended" ? discoverRanked[0]?.movie :
+    discoverPool.filter((movie) => !reviewed.has(movie.id)).sort((a, b) =>
+      discoverOrder === "newest" ? (b.year ?? 0) - (a.year ?? 0) :
+        (b.publicRating?.value ?? 0) - (a.publicRating?.value ?? 0),
+    )[0];
   const active =
-    movies.find((movie) => movie.id === activeId && matchesFilters(movie) &&
-      !entries.some((entry) => entry.movieId === movie.id)) ?? discoverRanked[0]?.movie;
+    discoverPool.find((movie) => movie.id === activeId && !reviewed.has(movie.id)) ?? nextMovie;
   const expandedDetails = details && details.id === active?.id ? details : null;
   useEffect(() => {
     if (active?.id !== activeId) setActiveId(active?.id ?? null);
@@ -118,7 +157,10 @@ export default function App() {
     setFilterError(false);
     const delay = setTimeout(async () => {
       try {
-        const found = await discoverPage(typeFilter, genreFilter, titleFilter.trim(), filterPage);
+        const found = await discoverPage(typeFilter, genreFilter, titleFilter.trim(), filterPage, {
+          year: filterByYear,
+          rating: Boolean(minimumRating),
+        });
         if (live) {
           mergeTitles(found);
           setFilterEnd(found.length === 0);
@@ -130,7 +172,7 @@ export default function App() {
       }
     }, 250);
     return () => { live = false; clearTimeout(delay); };
-  }, [page, hasFilters, catalogState, typeFilter, genreFilter, titleFilter, filterPage, filterRetry]);
+  }, [page, hasFilters, catalogState, typeFilter, genreFilter, titleFilter, filterByYear, firstYear, lastYear, minimumRating, filterPage, filterRetry]);
   useEffect(() => {
     if (!filterOpen || page !== "discover") return;
     function closeOutside(event: PointerEvent) {
@@ -155,7 +197,6 @@ export default function App() {
     }
     setDetails(movie);
     void ensureTitle(movie).then((full) => {
-      mergeTitles([full]);
       setDetails((current) => current?.id === full.id ? { ...full, metadataComplete: true } : current);
     }).catch(() => {
       setDetails((current) => current?.id === movie.id ? { ...current, metadataComplete: true } : current);
@@ -432,9 +473,9 @@ export default function App() {
     if (!active || busy) return;
     const distance = e.clientX - start.x;
     const vertical = e.clientY - start.y;
-    if (Math.abs(distance) > 90 && Math.abs(distance) > Math.abs(vertical))
+    if (!start.scrollable && Math.abs(distance) > 90 && Math.abs(distance) > Math.abs(vertical))
       void act(active, distance > 0 ? "watchlist" : "dismissed");
-    else if (start.poster && !start.moved && Math.hypot(distance, vertical) <= 9)
+    else if (!start.moved && Math.hypot(distance, vertical) <= 9)
       toggleDetails(active);
   }
   function resetFilterPage() {
@@ -527,7 +568,7 @@ export default function App() {
                 <button type="button" className="filter-toggle" ref={filterToggle}
                   aria-expanded={filterOpen} aria-controls="discover-filter-fields"
                   aria-label={hasFilters ? "Search and filters, filters active" : "Search and filters"}
-                  title="Search and filters" data-filter-active={hasFilters || undefined}
+                  title="Search and filters" data-filter-active={(hasFilters || discoverOrder !== "recommended") || undefined}
                   onClick={() => setFilterOpen((open) => !open)}>
                   <Search size={17} aria-hidden="true" />
                 </button>
@@ -550,8 +591,36 @@ export default function App() {
                         <option key={genre}>{genre}</option>,
                       )}
                     </select></label>
-                    {hasFilters && <button type="button" onClick={() => {
-                      setTitleFilter(""); setTypeFilter(""); setGenreFilter(""); resetFilterPage();
+                    <label>From year<input type="text" inputMode="numeric" maxLength={4} value={yearFrom}
+                      placeholder="Any" aria-invalid={invalidYears || undefined} onChange={(e) => {
+                        setYearFrom(e.target.value.replace(/\D/g, "")); resetFilterPage();
+                      }} /></label>
+                    <label>To year<input type="text" inputMode="numeric" maxLength={4} value={yearTo}
+                      placeholder="Any" aria-invalid={invalidYears || undefined} onChange={(e) => {
+                        setYearTo(e.target.value.replace(/\D/g, "")); resetFilterPage();
+                      }} /></label>
+                    {invalidYears && <p className="filter-range-error" role="status">From year must come before or match To year.</p>}
+                    <label className="rating-filter">Minimum IMDb rating<select value={minimumRating} onChange={(e) => {
+                      setMinimumRating(e.target.value); resetFilterPage();
+                    }}>
+                      <option value="">Any rating</option>
+                      {[5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10].map((value) => (
+                        <option key={value} value={value}>{value.toFixed(1)}+</option>
+                      ))}
+                    </select></label>
+                    <label className="rating-filter">Sort by<select value={discoverOrder} onChange={(e) => {
+                      const order = e.target.value;
+                      setDiscoverOrder(order === "newest" || order === "imdb" ? order : "recommended");
+                      setActiveId(null);
+                    }}>
+                      <option value="recommended">Recommended</option>
+                      <option value="newest">Newest first</option>
+                      <option value="imdb">Highest IMDb rating</option>
+                    </select></label>
+                    {(hasFilters || yearFrom || yearTo || discoverOrder !== "recommended") && <button type="button" onClick={() => {
+                      setTitleFilter(""); setTypeFilter(""); setGenreFilter("");
+                      setYearFrom(""); setYearTo(""); setMinimumRating("");
+                      setDiscoverOrder("recommended"); resetFilterPage();
                     }}>Clear filters</button>}
                   </div>
                 )}
@@ -573,24 +642,22 @@ export default function App() {
                       }}
                       onPointerDown={(e) => {
                         if (busy || !e.isPrimary || e.button !== 0) return;
-                        if (e.target instanceof Element && e.target.closest(".synopsis-full")) return;
-                        const poster = e.target instanceof Element && Boolean(e.target.closest(".poster-wrap"));
+                        const scrollable = e.target instanceof Element && Boolean(e.target.closest(".expanded-movie-info"));
+                        const pointerId = e.pointerId;
                         clearPress();
                         pointer.current = {
-                          id: e.pointerId,
+                          id: pointerId,
                           x: e.clientX,
                           y: e.clientY,
-                          poster,
+                          scrollable,
                           moved: false,
                         };
-                        if (poster) {
-                          pressTimer.current = setTimeout(() => {
-                            if (pointer.current?.id !== e.pointerId) return;
-                            cancelGesture();
-                            openRating(active);
-                          }, 550);
-                        }
-                        e.currentTarget.setPointerCapture(e.pointerId);
+                        pressTimer.current = setTimeout(() => {
+                          if (pointer.current?.id !== pointerId) return;
+                          cancelGesture();
+                          openRating(active);
+                        }, 550);
+                        if (!scrollable) e.currentTarget.setPointerCapture(pointerId);
                       }}
                       onPointerMove={(e) => {
                         const start = pointer.current;
@@ -601,11 +668,13 @@ export default function App() {
                           start.moved = true;
                           clearPress();
                         }
-                        setDrag(start.moved && Math.abs(x) > Math.abs(y) ? x : 0);
+                        if (!start.scrollable) setDrag(start.moved && Math.abs(x) > Math.abs(y) ? x : 0);
                       }}
                       onPointerUp={release}
                       onPointerCancel={cancelGesture}
                       onLostPointerCapture={cancelGesture}
+                      onPointerLeave={() => { if (pointer.current?.scrollable) cancelGesture(); }}
+                      onContextMenu={(event) => event.preventDefault()}
                       onKeyDown={(e) => {
                         if (e.key === "Escape" && expandedDetails) {
                           e.preventDefault();
@@ -614,51 +683,31 @@ export default function App() {
                         }
                       }}
                     >
-                      <button
-                        type="button"
-                        className="poster-wrap discover-poster"
-                        aria-label={expandedDetails ? "Collapse description" : `Read full description of ${active.title}`}
-                        aria-expanded={Boolean(expandedDetails)}
-                        aria-controls="discover-description"
-                        title={expandedDetails ? "Tap to collapse · Hold to rate" : "Tap for details · Hold to rate"}
-                        onContextMenu={(event) => event.preventDefault()}
-                        onClick={(event) => { if (event.detail === 0) toggleDetails(active); }}
-                        style={{ background: active.palette[0] }}
-                      >
-                        <Poster movie={active} framing="discovery" />
-                      </button>
-                      <div className="movie-info">
-                        <h2>{active.title}</h2>
-                        <p className="metadata">
-                          {[
-                            active.year ?? "Year unknown",
-                            active.mediaType === "movie" ? "Film" : "TV series",
-                            active.runtime && active.runtime !== "TV series"
-                              ? active.runtime
-                              : null,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
+                      <div className="poster-wrap">
+                        <button
+                          type="button"
+                          className="discover-poster"
+                          aria-label={expandedDetails ? "Collapse description" : `Read full description of ${active.title}`}
+                          aria-expanded={Boolean(expandedDetails)}
+                          aria-controls="discover-description"
+                          title={expandedDetails ? "Tap to collapse · Hold to rate" : "Tap for details · Hold to rate"}
+                          onClick={(event) => { if (event.detail === 0) toggleDetails(active); }}
+                        >
+                          <Poster movie={active} framing="discovery" />
+                        </button>
+                      </div>
+                      <div className="movie-info preview-movie-info" aria-hidden={Boolean(expandedDetails)}>
+                        <MovieFacts movie={active} />
+                        <p className="synopsis">{active.synopsis}</p>
+                      </div>
+                      <div className="movie-info expanded-movie-info" id="discover-description"
+                        role="region" aria-label="Full description" aria-hidden={!expandedDetails}
+                        inert={!expandedDetails} tabIndex={expandedDetails ? 0 : -1}>
+                        <MovieFacts movie={expandedDetails ?? active} />
+                        <p className="synopsis-full">
+                          {expandedDetails?.synopsis || active.synopsis ||
+                            (expandedDetails?.metadataComplete ? "No description available." : "Loading description…")}
                         </p>
-                        <p className="genres">{active.genres.join(", ")}</p>
-                        {active.publicRating && (
-                          <p className="metadata">
-                            IMDb {active.publicRating.value.toFixed(1)}
-                            {active.publicRating.votes !== undefined && ` · ${active.publicRating.votes.toLocaleString()} votes`}
-                          </p>
-                        )}
-                        <div className="synopsis-preview" aria-hidden={Boolean(expandedDetails)}>
-                          <div><p className="synopsis">{active.synopsis}</p></div>
-                        </div>
-                        <div className="synopsis-reveal" id="discover-description" aria-hidden={!expandedDetails}>
-                          <div>
-                            <div className="synopsis-full" role="region" aria-label="Full description"
-                              tabIndex={expandedDetails ? 0 : undefined}>
-                              {expandedDetails?.synopsis || active.synopsis ||
-                                (expandedDetails?.metadataComplete ? "No description available." : "Loading description…")}
-                            </div>
-                          </div>
-                        </div>
                       </div>
                       {Math.abs(drag) > 25 && (
                         <div
