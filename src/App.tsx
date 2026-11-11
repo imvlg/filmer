@@ -15,10 +15,12 @@ import {
   Check,
   Trash2,
   RotateCcw,
+  SlidersHorizontal,
 } from "lucide-react";
 import { type Movie } from "./catalog";
 import {
   catalogStatus,
+  discoverPage,
   initialCatalog,
   enrichSavedTitles,
   ensureTitle,
@@ -70,22 +72,81 @@ export default function App() {
   const [rating, setRating] = useState(7);
   const modal = useRef<HTMLDialogElement>(null);
   const opener = useRef<HTMLElement | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [titleFilter, setTitleFilter] = useState("");
+  const [genreFilter, setGenreFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"" | "movie" | "tv">("");
+  const [filterPage, setFilterPage] = useState(0);
+  const [filterLoading, setFilterLoading] = useState(false);
+  const [filterError, setFilterError] = useState(false);
+  const [filterRetry, setFilterRetry] = useState(0);
+  const [filterEnd, setFilterEnd] = useState(false);
+  const [details, setDetails] = useState<Movie | null>(null);
+  const detailsDialog = useRef<HTMLDialogElement>(null);
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [drag, setDrag] = useState(0);
   const [exit, setExit] = useState(0);
-  const pointer = useRef<{ id: number; x: number; y: number } | null>(null);
+  const pointer = useRef<{ id: number; x: number; y: number; poster: boolean; moved: boolean } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ranked = useMemo(() => recommend(movies, entries), [movies, entries]);
   const profile = useMemo(
     () => buildTasteProfile(movies, entries),
     [movies, entries],
   );
+  const hasFilters = Boolean(titleFilter.trim() || genreFilter || typeFilter);
+  function matchesFilters(movie: Movie) {
+    return (!titleFilter.trim() || movie.title.toLocaleLowerCase().includes(titleFilter.trim().toLocaleLowerCase())) &&
+      (!genreFilter || movie.genres.includes(genreFilter)) &&
+      (!typeFilter || movie.mediaType === typeFilter);
+  }
+  const discoverRanked = hasFilters ? recommend(movies.filter(matchesFilters), entries) : ranked;
   const active =
-    movies.find(
-      (m) => m.id === activeId && !entries.some((e) => e.movieId === m.id),
-    ) ?? ranked[0]?.movie;
+    movies.find((movie) => movie.id === activeId && matchesFilters(movie) &&
+      !entries.some((entry) => entry.movieId === movie.id)) ?? discoverRanked[0]?.movie;
   useEffect(() => {
     if (active?.id !== activeId) setActiveId(active?.id ?? null);
   }, [active?.id, activeId]);
+  useEffect(() => {
+    let live = true;
+    if (page !== "discover" || !hasFilters || !catalogState) {
+      setFilterLoading(false);
+      return;
+    }
+    setFilterLoading(true);
+    setFilterError(false);
+    const delay = setTimeout(async () => {
+      try {
+        const found = await discoverPage(typeFilter, genreFilter, titleFilter.trim(), filterPage);
+        if (live) {
+          mergeTitles(found);
+          setFilterEnd(found.length === 0);
+        }
+      } catch {
+        if (live) setFilterError(true);
+      } finally {
+        if (live) setFilterLoading(false);
+      }
+    }, 250);
+    return () => { live = false; clearTimeout(delay); };
+  }, [page, hasFilters, catalogState, typeFilter, genreFilter, titleFilter, filterPage, filterRetry]);
+  useEffect(() => {
+    const dialog = detailsDialog.current;
+    if (details && dialog && !dialog.open) dialog.showModal();
+    if (!details && dialog?.open) dialog.close();
+  }, [details]);
+  useEffect(() => () => {
+    if (pressTimer.current !== null) clearTimeout(pressTimer.current);
+    pointer.current = null;
+  }, [active?.id, page]);
+  function openDetails(movie: Movie) {
+    setDetails(movie);
+    void ensureTitle(movie).then((full) => {
+      mergeTitles([full]);
+      setDetails((current) => current?.id === full.id ? { ...full, metadataComplete: true } : current);
+    }).catch(() => {
+      setDetails((current) => current?.id === movie.id ? { ...current, metadataComplete: true } : current);
+    });
+  }
   function mergeTitles(titles: Movie[]) {
     setMovies((current) => [
       ...new Map([...current, ...titles].map((m) => [m.id, m])).values(),
@@ -316,6 +377,7 @@ export default function App() {
         page !== "discover" ||
         !active ||
         ratingMovie ||
+        details ||
         busy ||
         e.altKey ||
         e.ctrlKey ||
@@ -339,14 +401,33 @@ export default function App() {
     }
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [page, active, ratingMovie, busy]);
-  function release(e: React.PointerEvent) {
-    if (pointer.current?.id !== e.pointerId) return;
+  }, [page, active, ratingMovie, details, busy]);
+  function clearPress() {
+    if (pressTimer.current !== null) clearTimeout(pressTimer.current);
+    pressTimer.current = null;
+  }
+  function cancelGesture() {
+    clearPress();
     pointer.current = null;
-    const distance = drag;
     setDrag(0);
-    if (Math.abs(distance) > 90 && active && !busy)
+  }
+  function release(e: React.PointerEvent) {
+    const start = pointer.current;
+    if (!start || start.id !== e.pointerId) return;
+    cancelGesture();
+    if (!active || busy) return;
+    const distance = e.clientX - start.x;
+    const vertical = e.clientY - start.y;
+    if (Math.abs(distance) > 90 && Math.abs(distance) > Math.abs(vertical))
       void act(active, distance > 0 ? "watchlist" : "dismissed");
+    else if (start.poster && !start.moved && Math.hypot(distance, vertical) <= 9)
+      openDetails(active);
+  }
+  function resetFilterPage() {
+    setFilterPage(0);
+    setFilterEnd(false);
+    setFilterError(false);
+    setActiveId(null);
   }
   const shown = movies.filter((m) =>
     entries.some((e) => e.movieId === m.id && e.status === page),
@@ -423,6 +504,37 @@ export default function App() {
               aria-label="Movie discovery"
               style={cardTheme(active?.id)}
             >
+              <div className="discover-filter">
+                <button type="button" className="filter-toggle" aria-expanded={filterOpen}
+                  aria-controls="discover-filter-fields" onClick={() => setFilterOpen(!filterOpen)}>
+                  <SlidersHorizontal size={16} aria-hidden="true" />
+                  Filters{hasFilters ? " · active" : ""}
+                </button>
+                {filterOpen && (
+                  <div className="filter-fields" id="discover-filter-fields">
+                    <label>Title<input type="search" value={titleFilter} placeholder="Search by title"
+                      onChange={(e) => { setTitleFilter(e.target.value); resetFilterPage(); }} /></label>
+                    <label>Type<select value={typeFilter} onChange={(e) => {
+                      const type = e.target.value;
+                      setTypeFilter(type === "movie" || type === "tv" ? type : "");
+                      resetFilterPage();
+                    }}>
+                      <option value="">All types</option><option value="movie">Films</option><option value="tv">TV series</option>
+                    </select></label>
+                    <label>Genre<select value={genreFilter} onChange={(e) => {
+                      setGenreFilter(e.target.value); resetFilterPage();
+                    }}>
+                      <option value="">All genres</option>
+                      {["Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary", "Drama", "Family", "Fantasy", "Horror", "Mystery", "Romance", "Sci-Fi", "Thriller"].map((genre) =>
+                        <option key={genre}>{genre}</option>,
+                      )}
+                    </select></label>
+                    {hasFilters && <button type="button" onClick={() => {
+                      setTitleFilter(""); setTypeFilter(""); setGenreFilter(""); resetFilterPage();
+                    }}>Clear filters</button>}
+                  </div>
+                )}
+              </div>
               {!ready ? (
                 <p className="empty" role="status">
                   Loading films…
@@ -438,30 +550,52 @@ export default function App() {
                         opacity: exit ? 0 : 1,
                       }}
                       onPointerDown={(e) => {
-                        if (busy || e.button !== 0) return;
+                        if (busy || !e.isPrimary || e.button !== 0) return;
+                        const poster = e.target instanceof Element && Boolean(e.target.closest(".poster-wrap"));
+                        clearPress();
                         pointer.current = {
                           id: e.pointerId,
                           x: e.clientX,
                           y: e.clientY,
+                          poster,
+                          moved: false,
                         };
+                        if (poster) {
+                          pressTimer.current = setTimeout(() => {
+                            if (pointer.current?.id !== e.pointerId) return;
+                            cancelGesture();
+                            openRating(active);
+                          }, 550);
+                        }
                         e.currentTarget.setPointerCapture(e.pointerId);
                       }}
                       onPointerMove={(e) => {
-                        if (pointer.current?.id !== e.pointerId) return;
-                        setDrag(e.clientX - pointer.current.x);
+                        const start = pointer.current;
+                        if (!start || start.id !== e.pointerId) return;
+                        const x = e.clientX - start.x;
+                        const y = e.clientY - start.y;
+                        if (Math.hypot(x, y) > 9) {
+                          start.moved = true;
+                          clearPress();
+                        }
+                        setDrag(start.moved && Math.abs(x) > Math.abs(y) ? x : 0);
                       }}
                       onPointerUp={release}
-                      onPointerCancel={() => {
-                        pointer.current = null;
-                        setDrag(0);
-                      }}
+                      onPointerCancel={cancelGesture}
+                      onLostPointerCapture={cancelGesture}
                     >
-                      <div
-                        className="poster-wrap"
+                      <button
+                        type="button"
+                        className="poster-wrap discover-poster"
+                        aria-label={`Read full description of ${active.title}`}
+                        aria-haspopup="dialog"
+                        title="Tap for details · Hold to rate"
+                        onContextMenu={(event) => event.preventDefault()}
+                        onClick={(event) => { if (event.detail === 0) openDetails(active); }}
                         style={{ background: active.palette[0] }}
                       >
                         <Poster movie={active} framing="discovery" />
-                      </div>
+                      </button>
                       <div className="movie-info">
                         <h2>{active.title}</h2>
                         <p className="metadata">
@@ -539,7 +673,17 @@ export default function App() {
                 </>
               ) : (
                 <div className="empty">
-                  <p>No more films to discover.</p>
+                  <p role="status">{filterLoading ? "Finding titles…" : filterError
+                    ? "Could not load more titles." : hasFilters
+                    ? "No matching titles in this batch." : "No more films to discover."}</p>
+                  {hasFilters && catalogState && !filterLoading && !filterEnd && (
+                    <button className="primary" onClick={() => {
+                      if (filterError) setFilterRetry((n) => n + 1);
+                      else setFilterPage((n) => n + 1);
+                    }}>
+                      {filterError ? "Retry" : "Search next batch"}
+                    </button>
+                  )}
                   {entries.some((e) => e.status === "dismissed") && (
                     <button
                       className="primary"
@@ -742,6 +886,17 @@ export default function App() {
           </>
         )}
       </div>
+      <dialog className="title-details" ref={detailsDialog} aria-labelledby="details-title"
+        onClose={() => setDetails(null)}
+        onClick={(e) => { if (e.target === e.currentTarget) setDetails(null); }}>
+        {details && <div className="modal-inner">
+          <button type="button" className="details-close" aria-label="Close description"
+            onClick={() => setDetails(null)}><X size={20} aria-hidden="true" /></button>
+          <h2 id="details-title">{details.title}</h2>
+          <p className="metadata">{[details.year, ...details.genres].filter(Boolean).join(" · ")}</p>
+          <p className="full-synopsis">{details.synopsis || (details.metadataComplete ? "No description available." : "Loading description…")}</p>
+        </div>}
+      </dialog>
       <dialog
         ref={modal}
         onCancel={(e) => {

@@ -101,3 +101,28 @@ export async function moreCandidates(movies: Movie[], entries: Entry[]) {
   if (!successful.length) throw new Error("Online discovery is unavailable");
   return cache(successful.flatMap((r) => r.value));
 }
+
+export async function discoverPage(
+  type: "" | "movie" | "tv",
+  genre: string,
+  title: string,
+  page: number,
+) {
+  if (title) {
+    // Search and hydrate by title before applying the local genre filter.
+    const titles = await searchCatalog(title, page * 40);
+    if (!genre) return titles;
+    // Search results can omit genres. Resolve those before filtering the deck.
+    for (let offset = 0; offset < titles.length; offset += 6) {
+      const batch = titles.slice(offset, offset + 6);
+      const full = await Promise.all(batch.map((movie) =>
+        (!type || movie.mediaType === type) && !movie.genres.length ? ensureTitle(movie) : movie,
+      ));
+      titles.splice(offset, batch.length, ...full);
+    }
+    return titles;
+  }
+  const types: ("movie" | "series")[] = type === "tv" ? ["series"] : type ? ["movie"] : ["movie", "series"];
+  const results = await Promise.all(types.map((media) => catalogPage(media, { genre, skip: page * 50 })));
+  return cache(results.flat());
+}

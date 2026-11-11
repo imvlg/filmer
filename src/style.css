@@ -1639,3 +1639,94 @@ dialog {
     font-size: 13px;
   }
 }
+
+.discover-filter {
+  align-self: center;
+  width: min(100%, 340px);
+  margin: 0 auto 10px;
+  flex-shrink: 0;
+}
+.filter-toggle, .filter-fields button, .details-close {
+  border: 1px solid #d5b58d;
+  border-radius: 999px;
+  background: #fff5df;
+  color: #593424;
+  padding: 8px 12px;
+}
+.filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.filter-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid #d5b58d;
+  border-radius: 18px;
+  background: #fff5df;
+}
+.filter-fields label {
+  display: grid;
+  gap: 3px;
+  font-size: .85rem;
+}
+.filter-fields label:first-child { grid-column: 1 / -1; }
+.filter-fields input, .filter-fields select {
+  min-width: 0;
+  width: 100%;
+  padding: 6px;
+  border: 1px solid #d5b58d;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: inherit;
+  font: inherit;
+}
+button.discover-poster {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+.discover-poster:focus-visible {
+  outline: 3px solid var(--rust);
+  outline-offset: -4px;
+}
+.title-details {
+  max-height: 80dvh;
+  overflow: auto;
+}
+.title-details .modal-inner {
+  position: relative;
+  padding-top: 54px;
+  text-align: left;
+}
+.details-close {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  display: grid;
+  place-items: center;
+}
+.title-details .full-synopsis {
+  display: block;
+  white-space: pre-wrap;
+  overflow: visible;
+  line-height: 1.6;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .title-details[open] { animation: unfold-details 240ms ease-out both; }
+  .filter-fields { animation: unfold-details 170ms ease-out both; }
+  @keyframes unfold-details {
+    from { opacity: 0; transform: translateY(10px) scale(.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+}
+@media (max-width: 640px) {
+  main:has(.filter-fields) { height: auto; }
+}
