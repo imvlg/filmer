@@ -1,0 +1,85 @@
+{
+  "retrievedAt": "2026-11-09T21:55:16.810Z",
+  "posters": {
+    "demo:grand-budapest": {
+      "imdbId": "tt2278388",
+      "title": "The Grand Budapest Hotel",
+      "src": "https://m.media-amazon.com/images/M/MV5BMzM5NjUxOTEyMl5BMl5BanBnXkFtZTgwNjEyMDM0MDE@._V1_.jpg",
+      "fallback": "posters/tt2278388.jpg",
+      "width": 1350,
+      "height": 2000,
+      "source": "https://www.imdb.com/title/tt2278388/",
+      "metadataUrl": "https://v3.sg.media-imdb.com/suggestion/t/tt2278388.json"
+    },
+    "demo:moonrise": {
+      "imdbId": "tt1748122",
+      "title": "Moonrise Kingdom",
+      "src": "https://m.media-amazon.com/images/M/MV5BMTEwMTc3NDkzOTJeQTJeQWpwZ15BbWU3MDI4NTAwNzc@._V1_.jpg",
+      "fallback": "posters/tt1748122.jpg",
+      "width": 1382,
+      "height": 2048,
+      "source": "https://www.imdb.com/title/tt1748122/",
+      "metadataUrl": "https://v3.sg.media-imdb.com/suggestion/t/tt1748122.json"
+    },
+    "demo:amelie": {
+      "imdbId": "tt0211915",
+      "title": "Amélie",
+      "src": "https://m.media-amazon.com/images/M/MV5BOTNmYzY0MWQtZGZmNy00Y2Y4LWFmMDQtMTZjYTdiYzEwZGQ2XkEyXkFqcGc@._V1_.jpg",
+      "fallback": "posters/tt0211915.jpg",
+      "width": 1280,
+      "height": 1920,
+      "source": "https://www.imdb.com/title/tt0211915/",
+      "metadataUrl": "https://v3.sg.media-imdb.com/suggestion/t/tt0211915.json"
+    },
+    "demo:life-aquatic": {
+      "imdbId": "tt0362270",
+      "title": "The Life Aquatic with Steve Zissou",
+      "src": "https://m.media-amazon.com/images/M/MV5BMTYzODYzNzg2MF5BMl5BanBnXkFtZTcwMTkzOTQzMw@@._V1_.jpg",
+      "fallback": "posters/tt0362270.jpg",
+      "width": 1401,
+      "height": 2048,
+      "source": "https://www.imdb.com/title/tt0362270/",
+      "metadataUrl": "https://v3.sg.media-imdb.com/suggestion/t/tt0362270.json"
+    },
+    "demo:past-lives": {
+      "imdbId": "tt13238346",
+      "title": "Past Lives",
+      "src": "https://m.media-amazon.com/images/M/MV5BYjQyMTNhNjUtN2VmYy00NWRhLTkwOTctMGVmNTBmNDIxYjZhXkEyXkFqcGc@._V1_.jpg",
+      "fallback": "posters/tt13238346.jpg",
+      "width": 972,
+      "height": 1440,
+      "source": "https://www.imdb.com/title/tt13238346/",
+      "metadataUrl": "https://v3.sg.media-imdb.com/suggestion/t/tt13238346.json"
+    },
+    "demo:over-garden": {
+      "imdbId": "tt3718778",
+      "title": "Over the Garden Wall",
+      "src": "https://m.media-amazon.com/images/M/MV5BOTA2MTdhZmItODM3NS00ZmFlLWE4YWYtOWYxODBmNGU5YjRjXkEyXkFqcGc@._V1_.jpg",
+      "fallback": "posters/tt3718778.jpg",
+      "width": 1000,
+      "height": 1426,
+      "source": "https://www.imdb.com/title/tt3718778/",
+      "metadataUrl": "https://v3.sg.media-imdb.com/suggestion/t/tt3718778.json"
+    },
+    "demo:darjeeling": {
+      "imdbId": "tt0838221",
+      "title": "The Darjeeling Limited",
+      "src": "https://m.media-amazon.com/images/M/MV5BZDY4Mzc2YTQtZDg4ZS00OGIzLWJhOGMtOTQ2OThmNzg4NTc4XkEyXkFqcGc@._V1_.jpg",
+      "fallback": "posters/tt0838221.jpg",
+      "width": 790,
+      "height": 1170,
+      "source": "https://www.imdb.com/title/tt0838221/",
+      "metadataUrl": "https://v3.sg.media-imdb.com/suggestion/t/tt0838221.json"
+    },
+    "demo:severance": {
+      "imdbId": "tt11280740",
+      "title": "Severance",
+      "src": "https://m.media-amazon.com/images/M/MV5BZDI5YzJhODQtMzQyNy00YWNmLWIxMjUtNDBjNjA5YWRjMzExXkEyXkFqcGc@._V1_.jpg",
+      "fallback": "posters/tt11280740.jpg",
+      "width": 2000,
+      "height": 3000,
+      "source": "https://www.imdb.com/title/tt11280740/",
+      "metadataUrl": "https://v3.sg.media-imdb.com/suggestion/t/tt11280740.json"
+    }
+  }
+}

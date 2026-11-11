@@ -1,0 +1,38 @@
+{
+  "typeface": "Playfair Display",
+  "weight": 600,
+  "minimumInkGapSvg": 3.6252189141856395,
+  "minimumInkGapAt174px": 2.3362521891418564,
+  "letters": [
+    {
+      "letter": "f",
+      "inkLeft": 20,
+      "inkRight": 51.90192644483362
+    },
+    {
+      "letter": "i",
+      "inkLeft": 55.527145359019265,
+      "inkRight": 76.6339754816112
+    },
+    {
+      "letter": "l",
+      "inkLeft": 80.25919439579684,
+      "inkRight": 101.3660245183888
+    },
+    {
+      "letter": "m",
+      "inkLeft": 104.99124343257444,
+      "inkRight": 174.27320490367777
+    },
+    {
+      "letter": "e",
+      "inkLeft": 177.8984238178634,
+      "inkRight": 212.21716287215412
+    },
+    {
+      "letter": "r",
+      "inkLeft": 215.84238178633976,
+      "inkRight": 250
+    }
+  ]
+}

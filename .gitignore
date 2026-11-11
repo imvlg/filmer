@@ -1,0 +1,9 @@
+node_modules/
+dist/
+data/
+__pycache__/
+*.sqlite
+*.sqlite-*
+.local-catalog.json
+*.tsbuildinfo
+.sites-local/
