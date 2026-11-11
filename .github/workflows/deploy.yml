@@ -24,6 +24,9 @@ jobs:
       - run: npm run build
       - run: npm run check:static
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+          token: ${{ secrets.PAGES_ENABLE_TOKEN || github.token }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
