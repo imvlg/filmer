@@ -1931,15 +1931,17 @@ button.discover-poster {
   .sidebar::before {
     content: "";
     position: absolute;
-    inset: -12% -52%;
+    inset: 0;
+    border-radius: inherit;
     z-index: -1;
     pointer-events: none;
-    transform: translate3d(-18%, 0, 0);
-    background: linear-gradient(116deg, transparent 36%,
-      color-mix(in srgb, var(--sidebar-glint) 12%, transparent) 44%,
-      color-mix(in srgb, var(--sidebar-glint) 31%, transparent) 50%,
-      color-mix(in srgb, var(--sidebar-glint) 13%, transparent) 54%,
-      transparent 64%);
+    background-image: radial-gradient(ellipse at center,
+      color-mix(in srgb, var(--sidebar-glint) 7%, transparent) 0%,
+      color-mix(in srgb, var(--sidebar-glint) 3%, transparent) 33%,
+      transparent 68%);
+    background-repeat: no-repeat;
+    background-size: 170% 108%;
+    background-position: 25% 0;
   }
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -1960,8 +1962,8 @@ button.discover-poster {
       87% { --sidebar-lacquer: #355e65; --sidebar-glint: #c9eee5; }
     }
     @keyframes sidebar-reflection {
-      from { transform: translate3d(-38%, -5%, 0); }
-      to { transform: translate3d(38%, 5%, 0); }
+      from { background-position: -35% -20%; }
+      to { background-position: 135% 120%; }
     }
   }
 }
