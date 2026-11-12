@@ -1906,14 +1906,40 @@ button.discover-poster {
 .collection-card {
   box-shadow: 0 8px 22px #64472513, inset 0 1px 0 #fff9e8;
 }
+@property --sidebar-lacquer {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #365f53;
+}
+@property --sidebar-glint {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #e0efd5;
+}
 @media (min-width: 641px) {
   .sidebar {
+    isolation: isolate;
+    overflow: clip;
     background-image:
-      radial-gradient(ellipse at 12% 12%, #d6b98b26 0, transparent 55%),
-      linear-gradient(125deg, #284e45 6%, #456e62 30%, #546d58 51%, #695447 72%, #294b43 96%);
-    background-size: 170% 170%, 260% 260%;
-    background-position: 0 0, 23% 50%;
+      radial-gradient(ellipse at 12% 5%, color-mix(in srgb, var(--sidebar-glint) 16%, transparent), transparent 58%),
+      linear-gradient(145deg, var(--sidebar-lacquer) 12%,
+        color-mix(in srgb, var(--sidebar-lacquer) 90%, #bf9264) 51%,
+        color-mix(in srgb, var(--sidebar-lacquer) 64%, #18352f) 100%);
+    border-color: color-mix(in srgb, var(--sidebar-lacquer) 78%, #27443b);
     box-shadow: inset 0 1px 0 #dbd0a86b, 0 14px 35px #28413731;
+  }
+  .sidebar::before {
+    content: "";
+    position: absolute;
+    inset: -12% -52%;
+    z-index: -1;
+    pointer-events: none;
+    transform: translate3d(-18%, 0, 0);
+    background: linear-gradient(116deg, transparent 36%,
+      color-mix(in srgb, var(--sidebar-glint) 12%, transparent) 44%,
+      color-mix(in srgb, var(--sidebar-glint) 31%, transparent) 50%,
+      color-mix(in srgb, var(--sidebar-glint) 13%, transparent) 54%,
+      transparent 64%);
   }
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -1924,10 +1950,18 @@ button.discover-poster {
     .collection-card:hover { transform: translateY(-3px); box-shadow: 0 12px 27px #64472525; }
   }
   @media (min-width: 641px) {
-    .sidebar { animation: sidebar-colors 26s ease-in-out infinite alternate; }
+    .sidebar { animation: sidebar-colors 12s linear infinite; }
+    .sidebar::before { animation: sidebar-reflection 5.4s ease-in-out infinite alternate; }
     @keyframes sidebar-colors {
-      from { background-position: 0 0, 4% 50%; }
-      to { background-position: 66% 48%, 94% 50%; }
+      0%, 100% { --sidebar-lacquer: #365f53; --sidebar-glint: #e0efd5; }
+      23% { --sidebar-lacquer: #566443; --sidebar-glint: #f2dfaa; }
+      47% { --sidebar-lacquer: #794735; --sidebar-glint: #ffd4ad; }
+      70% { --sidebar-lacquer: #614957; --sidebar-glint: #eed2da; }
+      87% { --sidebar-lacquer: #355e65; --sidebar-glint: #c9eee5; }
+    }
+    @keyframes sidebar-reflection {
+      from { transform: translate3d(-38%, -5%, 0); }
+      to { transform: translate3d(38%, 5%, 0); }
     }
   }
 }

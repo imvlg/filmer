@@ -23,9 +23,12 @@ const manifest = JSON.parse(await readFile(new URL("manifest.webmanifest", root)
 assert.equal(manifest.start_url, "./");
 assert.equal(manifest.scope, "./");
 assert.equal(manifest.display, "standalone");
-const appleIcon = html.match(/rel="apple-touch-icon" sizes="180x180" href="\.\/([^\"]+)"/);
-assert(appleIcon, "iPhone Home Screen icon missing");
-const icons = [...manifest.icons, { src: appleIcon[1], sizes: "180x180" }];
+const appleIcons = [...html.matchAll(/rel="apple-touch-icon" sizes="(\d+x\d+)" href="\.\/([^\"]+)"/g)]
+  .map(([, sizes, src]) => ({ src, sizes }));
+for (const sizes of ["180x180", "120x120"]) {
+  assert(appleIcons.some((icon) => icon.sizes === sizes), `iPhone Home Screen icon missing: ${sizes}`);
+}
+const icons = [...manifest.icons, ...appleIcons, { src: "apple-touch-icon.png", sizes: "180x180" }];
 for (const { src, sizes } of icons) {
   const url = new URL(src, root);
   assert(url.href.startsWith(root.href), "App icon must live within the published site");
