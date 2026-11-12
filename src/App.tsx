@@ -1,4 +1,5 @@
 import {
+  startTransition,
   useEffect,
   useMemo,
   useRef,
@@ -24,18 +25,17 @@ import {
   initialCatalog,
   enrichSavedTitles,
   ensureTitle,
-  imdbId,
   moreCandidates,
   searchCatalog,
   type CatalogStatus,
 } from "./catalogService";
 import { buildTasteProfile, recommend } from "./recommendations";
+import { imdbId, localTitleId, movieKey } from "./titleIdentity";
 import { getTitleContext, type TitleContext } from "./titleContext";
 import {
   db,
   saveAction,
   removeEntry,
-  revisitDismissed,
   type Entry,
   type Status,
 } from "./db";
@@ -49,6 +49,7 @@ const sections = [
   { id: "rated", label: "Rated", icon: Star },
   { id: "for-you", label: "For You", icon: Aperture },
 ] as const;
+const handoffDuration = 360;
 type Section = (typeof sections)[number]["id"];
 type DiscoverOrder = "recommended" | "newest" | "imdb";
 function MovieFacts({ movie }: { movie: Movie }) {
@@ -116,11 +117,14 @@ export default function App() {
   const [titleContext, setTitleContext] = useState<TitleContext | null>(null);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [drag, setDrag] = useState(0);
+  const [deckLoading, setDeckLoading] = useState(false);
   const cardNode = useRef<HTMLElement>(null);
   const dragFrame = useRef<number | null>(null);
-  const [departureCard, setDepartureCard] = useState<{ id: string; direction: number } | null>(null);
-  const pointer = useRef<{ id: number; x: number; y: number; scrollable: boolean; moved: boolean } | null>(null);
+  const pendingDrag = useRef(0);
+  const [departureCard, setDepartureCard] = useState<{ movie: Movie; next?: Movie; direction: number } | null>(null);
+  const pointer = useRef<{ id: number; x: number; y: number; scrollable: boolean; moved: boolean; axis: "x" | "y" | null } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finishHandoff = useRef<(() => void) | null>(null);
   const ranked = useMemo(() => recommend(movies, entries), [movies, entries]);
   const profile = useMemo(
     () => buildTasteProfile(movies, entries),
@@ -141,19 +145,23 @@ export default function App() {
   const discoverRanked = useMemo(() => hasFilters && discoverOrder === "recommended"
     ? recommend(discoverPool, entries, 200, movies) : ranked,
     [discoverPool, entries, movies, ranked, hasFilters, discoverOrder]);
-  const reviewed = new Set(entries.map((entry) => entry.movieId));
-  const nextMovie = discoverOrder === "recommended" ? discoverRanked[0]?.movie :
-    discoverPool.filter((movie) => !reviewed.has(movie.id)).sort((a, b) =>
-      discoverOrder === "newest" ? (b.year ?? 0) - (a.year ?? 0) :
-        (b.publicRating?.value ?? 0) - (a.publicRating?.value ?? 0),
-    )[0];
-  const active =
-    discoverPool.find((movie) => movie.id === activeId && !reviewed.has(movie.id)) ?? nextMovie;
-  const exit = departureCard?.id === active?.id ? departureCard?.direction ?? 0 : 0;
+  const reviewed = useMemo(() => new Set(entries.map((entry) => localTitleId(entry.movieId))), [entries]);
+  const queue = useMemo(() => {
+    if (discoverOrder === "recommended") return discoverRanked.map(({ movie }) => movie);
+    return [...new Map(discoverPool.map((movie) => [movieKey(movie), movie]))].flatMap(([id, movie]) =>
+      reviewed.has(id) ? [] : [movie],
+    ).sort((a, b) => discoverOrder === "newest" ? (b.year ?? 0) - (a.year ?? 0) :
+      (b.publicRating?.value ?? 0) - (a.publicRating?.value ?? 0));
+  }, [discoverOrder, discoverRanked, discoverPool, reviewed]);
+  const active = departureCard?.movie ??
+    discoverPool.find((movie) => movieKey(movie) === activeId && !reviewed.has(movieKey(movie))) ?? queue[0];
+  const queued = departureCard ? departureCard.next : queue.find((movie) => !active || movieKey(movie) !== movieKey(active));
+  const exit = departureCard?.direction ?? 0;
   const expandedDetails = details && details.id === active?.id ? details : null;
   useEffect(() => {
-    if (active?.id !== activeId) setActiveId(active?.id ?? null);
-  }, [active?.id, activeId]);
+    const id = active ? movieKey(active) : null;
+    if (id !== activeId) setActiveId(id);
+  }, [active, activeId]);
   useEffect(() => {
     let live = true;
     if (page !== "discover" || !hasFilters || !catalogState) {
@@ -222,19 +230,20 @@ export default function App() {
     });
   }
   function mergeTitles(titles: Movie[]) {
-    setMovies((current) => [
-      ...new Map([...current, ...titles].map((m) => [m.id, m])).values(),
-    ]);
+    startTransition(() => setMovies((current) => [
+      ...new Map([...current, ...titles].map((m) => [movieKey(m), m])).values(),
+    ]));
   }
   async function refill(
     current: Entry[],
     pool = movies,
     online = Boolean(catalogState),
+    advance = false,
   ) {
     if (!online) return;
     const request = ++candidateRequest.current;
     try {
-      const titles = await moreCandidates(pool, current);
+      const titles = await moreCandidates(pool, current, advance);
       if (request === candidateRequest.current) mergeTitles(titles);
     } catch {
       /* Keep cached discovery usable during a local catalog interruption. */
@@ -373,7 +382,7 @@ export default function App() {
   function openRating(movie: Movie) {
     if (page === "discover") pulseAction("rated");
     opener.current = document.activeElement as HTMLElement;
-    setRating(entries.find((e) => e.movieId === movie.id)?.rating ?? 0);
+    setRating(entries.find((e) => localTitleId(e.movieId) === movieKey(movie))?.rating ?? 0);
     setRatingMovie(movie);
     void ensureTitle(movie).then((title) => mergeTitles([title])).catch(() => {});
   }
@@ -391,22 +400,37 @@ export default function App() {
     setBusy(true);
     setError("");
     try {
+      const next = page === "discover" ? queued : undefined;
       const departure = page === "discover" ? new Promise<void>((resolve) => {
-        setDepartureCard({ id: movie.id, direction: status === "dismissed" ? -1 : 1 });
-        timer.current = setTimeout(resolve,
-          window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 280,
-        );
+        setDepartureCard({ movie, next, direction: status === "dismissed" ? -1 : 1 });
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          resolve();
+        } else {
+          const finish = () => {
+            if (timer.current !== null) clearTimeout(timer.current);
+            timer.current = null;
+            finishHandoff.current = null;
+            resolve();
+          };
+          finishHandoff.current = finish;
+          timer.current = setTimeout(finish, handoffDuration + 85);
+        }
       }) : Promise.resolve();
-      await saveAction(movie.id, status, value);
-      void ensureTitle(movie).then(async (title) => {
-        mergeTitles([title]);
-        const current = await db.entries.toArray();
-        const pool = [...new Map([...movies, title].map((m) => [m.id, m])).values()];
-        await refill(current, pool);
-      }).catch(() => {});
+      const saved = await saveAction(movieKey(movie), status, value);
       await departure;
-      await refresh();
-      if (page !== "discover") setActiveId(null);
+      const current = [...entries.filter((entry) => localTitleId(entry.movieId) !== saved.movieId), saved];
+      setEntries(current);
+      setActiveId(next ? movieKey(next) : null);
+      void refill(current);
+      void ensureTitle(movie).then(async (title) => {
+        if (title === movie || !title.metadataComplete) return;
+        mergeTitles([title]);
+        const latest = await db.entries.toArray();
+        const pool = [...new Map([...movies, title].map((m) => [m.id, m])).values()];
+        if (latest.some((entry) => entry.movieId === saved.movieId && entry.updatedAt === saved.updatedAt)) {
+          await refill(latest, pool);
+        }
+      }).catch(() => {});
       setRatingMovie(null);
       setNotice(
         status === "watchlist"
@@ -420,6 +444,9 @@ export default function App() {
         "That change could not be saved. Your card is still here. Please try again.",
       );
     } finally {
+      if (timer.current !== null) clearTimeout(timer.current);
+      timer.current = null;
+      finishHandoff.current = null;
       resetDrag();
       setDepartureCard(null);
       setBusy(false);
@@ -494,12 +521,14 @@ export default function App() {
     resetDrag();
   }
   function moveCard(distance: number) {
-    if (dragFrame.current !== null) cancelAnimationFrame(dragFrame.current);
+    pendingDrag.current = distance;
+    if (dragFrame.current !== null) return;
     dragFrame.current = requestAnimationFrame(() => {
       dragFrame.current = null;
       const card = cardNode.current;
       if (!card) return;
-      card.dataset.swiping = "true";
+      if (!card.hasAttribute("data-swiping")) card.dataset.swiping = "true";
+      const distance = pendingDrag.current;
       card.style.setProperty("--drag-x", `${distance}px`);
       card.style.setProperty("--drag-angle", `${Math.max(-14, Math.min(14, distance / 30))}deg`);
       setDrag(Math.abs(distance) > 25 ? Math.sign(distance) : 0);
@@ -511,7 +540,7 @@ export default function App() {
     const distance = e.clientX - start.x;
     const vertical = e.clientY - start.y;
     stopTracking();
-    if (active && !busy && !start.scrollable && Math.abs(distance) > 90 && Math.abs(distance) > Math.abs(vertical)) {
+    if (active && !busy && !start.scrollable && start.axis !== "y" && Math.abs(distance) > 90 && Math.abs(distance) > Math.abs(vertical)) {
       void act(active, distance > 0 ? "watchlist" : "dismissed");
     } else {
       resetDrag();
@@ -672,111 +701,129 @@ export default function App() {
                 </p>
               ) : active ? (
                 <>
-                  <div className="card-stage">
-                    <article
-                      key={active.id}
-                      ref={cardNode}
-                      className={`movie-card ${exit ? "exiting" : ""}`}
-                      data-description-open={Boolean(expandedDetails)}
-                      style={{
-                        "--exit-x": exit < 0 ? "calc(-100vw - 120px)" : "calc(100vw + 120px)",
-                        "--exit-angle": `${exit * 14}deg`,
-                      } as CSSProperties}
-                      onPointerDown={(e) => {
-                        if (busy || !e.isPrimary || e.button !== 0) return;
-                        if (e.target instanceof Element && e.target.closest("a")) return;
-                        if (e.pointerType === "touch") e.preventDefault();
-                        const scrollable = e.target instanceof Element && Boolean(e.target.closest(".expanded-movie-info"));
-                        const pointerId = e.pointerId;
-                        clearPress();
-                        pointer.current = {
-                          id: pointerId,
-                          x: e.clientX,
-                          y: e.clientY,
-                          scrollable,
-                          moved: false,
-                        };
-                        pressTimer.current = setTimeout(() => {
-                          if (pointer.current?.id !== pointerId) return;
-                          cancelGesture();
-                          window.getSelection()?.removeAllRanges();
-                          openRating(active);
-                        }, 550);
-                        if (!scrollable) e.currentTarget.setPointerCapture(pointerId);
-                      }}
-                      onPointerMove={(e) => {
-                        const start = pointer.current;
-                        if (!start || start.id !== e.pointerId) return;
-                        const x = e.clientX - start.x;
-                        const y = e.clientY - start.y;
-                        if (Math.hypot(x, y) > 9) {
-                          start.moved = true;
-                          clearPress();
-                        }
-                        if (!start.scrollable && Math.abs(x) > Math.abs(y)) moveCard(x);
-                      }}
-                      onPointerUp={release}
-                      onPointerCancel={cancelGesture}
-                      onLostPointerCapture={cancelGesture}
-                      onPointerLeave={() => { if (pointer.current?.scrollable) cancelGesture(); }}
-                      onContextMenu={(event) => event.preventDefault()}
-                      onCopy={(event) => event.preventDefault()}
-                      onKeyDown={(e) => {
-                        if (e.key === "Escape" && expandedDetails) {
-                          e.preventDefault();
-                          setDetails(null);
-                          e.currentTarget.querySelector<HTMLButtonElement>(".discover-poster")?.focus();
-                        }
-                      }}
-                    >
-                      <div className="poster-wrap">
-                        <button
-                          type="button"
-                          className="discover-poster"
-                          aria-label={expandedDetails ? "Collapse description" : `Read full description of ${active.title}`}
-                          aria-expanded={Boolean(expandedDetails)}
-                          aria-controls="discover-description"
-                          title={expandedDetails ? "Tap to collapse · Hold to rate" : "Tap for details · Hold to rate"}
-                          onClick={(event) => { if (event.detail === 0) toggleDetails(active); }}
+                  <div className="card-stage" data-handoff={Boolean(exit)} style={{ "--handoff-duration": `${handoffDuration}ms` } as CSSProperties}>
+                    <span className="card-sleeve sleeve-left" aria-hidden="true"><span className="sleeve-light" /></span>
+                    <span className="card-sleeve sleeve-right" aria-hidden="true"><span className="sleeve-light" /></span>
+                    {[queued, active].map((card, index) => {
+                      if (!card) return null;
+                      const front = index === 1;
+                      const expanded = front ? expandedDetails : null;
+                      return (
+                        <article
+                          key={movieKey(card)}
+                          ref={front ? cardNode : undefined}
+                          inert={!front}
+                          aria-hidden={!front || undefined}
+                          className={`movie-card ${front ? "deck-front" : "deck-queued"} ${front && exit ? "exiting" : ""}`}
+                          data-description-open={Boolean(expanded)}
+                          style={{
+                            "--exit-x": exit < 0 ? "calc(-100vw - 120px)" : "calc(100vw + 120px)",
+                            "--exit-angle": `${exit * 14}deg`,
+                          } as CSSProperties}
+                          onPointerDown={(e) => {
+                            if (!front || busy || !e.isPrimary || e.button !== 0) return;
+                            if (e.target instanceof Element && e.target.closest("a")) return;
+                            if (e.pointerType === "touch") e.preventDefault();
+                            const scrollable = e.target instanceof Element && Boolean(e.target.closest(".expanded-movie-info"));
+                            const pointerId = e.pointerId;
+                            clearPress();
+                            pointer.current = {
+                              id: pointerId,
+                              x: e.clientX,
+                              y: e.clientY,
+                              scrollable,
+                              moved: false,
+                              axis: null,
+                            };
+                            pressTimer.current = setTimeout(() => {
+                              if (pointer.current?.id !== pointerId) return;
+                              cancelGesture();
+                              window.getSelection()?.removeAllRanges();
+                              openRating(card);
+                            }, 550);
+                            if (!scrollable) e.currentTarget.setPointerCapture(pointerId);
+                          }}
+                          onPointerMove={(e) => {
+                            const start = pointer.current;
+                            if (!start || start.id !== e.pointerId) return;
+                            const x = e.clientX - start.x;
+                            const y = e.clientY - start.y;
+                            if (Math.hypot(x, y) > 9) {
+                              start.moved = true;
+                              clearPress();
+                            }
+                            if (!start.axis && Math.hypot(x, y) >= 4) start.axis = Math.abs(x) > Math.abs(y) ? "x" : "y";
+                            if (!start.scrollable && start.axis === "x") moveCard(x);
+                          }}
+                          onPointerUp={release}
+                          onTransitionEnd={(event) => {
+                            if (front && exit && event.target === event.currentTarget && event.propertyName === "transform") {
+                              finishHandoff.current?.();
+                            }
+                          }}
+                          onPointerCancel={cancelGesture}
+                          onLostPointerCapture={cancelGesture}
+                          onPointerLeave={() => { if (pointer.current?.scrollable) cancelGesture(); }}
+                          onContextMenu={(event) => event.preventDefault()}
+                          onCopy={(event) => event.preventDefault()}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape" && expanded) {
+                              e.preventDefault();
+                              setDetails(null);
+                              e.currentTarget.querySelector<HTMLButtonElement>(".discover-poster")?.focus();
+                            }
+                          }}
                         >
-                          <Poster movie={active} framing="discovery" />
-                        </button>
-                      </div>
-                      <div className="movie-info preview-movie-info" aria-hidden={Boolean(expandedDetails)}>
-                        <MovieFacts movie={active} />
-                        <p className="synopsis">{active.synopsis}</p>
-                      </div>
-                      <div className="movie-info expanded-movie-info" id="discover-description"
-                        role="region" aria-label="Full description" aria-hidden={!expandedDetails}
-                        inert={!expandedDetails} tabIndex={expandedDetails ? 0 : -1}>
-                        <MovieFacts movie={expandedDetails ?? active} />
-                        <p className="synopsis-full">
-                          {expandedDetails?.synopsis || active.synopsis ||
-                            (expandedDetails?.metadataComplete ? "No description available." : "Loading description…")}
-                        </p>
-                        {expandedDetails && <>
-                          {(expandedDetails.director || Boolean(expandedDetails.cast?.length) || Boolean(expandedDetails.countries?.length)) && (
-                            <dl className="title-credits">
-                              {expandedDetails.director && <><dt>Director</dt><dd>{expandedDetails.director}</dd></>}
-                              {Boolean(expandedDetails.cast?.length) && <><dt>Cast</dt><dd>{expandedDetails.cast?.slice(0, 5).join(", ")}</dd></>}
-                              {Boolean(expandedDetails.countries?.length) && <><dt>Country</dt><dd>{expandedDetails.countries?.join(", ")}</dd></>}
-                            </dl>
+                          <div className="poster-wrap">
+                            <button
+                              type="button"
+                              className="discover-poster"
+                              aria-label={expanded ? "Collapse description" : `Read full description of ${card.title}`}
+                              aria-expanded={Boolean(expanded)}
+                              aria-controls={front ? "discover-description" : undefined}
+                              title={expanded ? "Tap to collapse · Hold to rate" : "Tap for details · Hold to rate"}
+                              onClick={(event) => { if (event.detail === 0) toggleDetails(card); }}
+                            >
+                              <Poster movie={card} framing="discovery" />
+                            </button>
+                          </div>
+                          <div className="movie-info preview-movie-info" aria-hidden={Boolean(expanded)}>
+                            <MovieFacts movie={card} />
+                            <p className="synopsis">{card.synopsis}</p>
+                          </div>
+                          <div className="movie-info expanded-movie-info" id={front ? "discover-description" : undefined}
+                            role="region" aria-label="Full description" aria-hidden={!expanded}
+                            inert={!expanded} tabIndex={expanded ? 0 : -1}>
+                            <MovieFacts movie={expanded ?? card} />
+                            <p className="synopsis-full">
+                              {expanded?.synopsis || card.synopsis ||
+                                (expanded?.metadataComplete ? "No description available." : "Loading description…")}
+                            </p>
+                            {expanded && <>
+                              {(expanded.director || Boolean(expanded.cast?.length) || Boolean(expanded.countries?.length)) && (
+                                <dl className="title-credits">
+                                  {expanded.director && <><dt>Director</dt><dd>{expanded.director}</dd></>}
+                                  {Boolean(expanded.cast?.length) && <><dt>Cast</dt><dd>{expanded.cast?.slice(0, 5).join(", ")}</dd></>}
+                                  {Boolean(expanded.countries?.length) && <><dt>Country</dt><dd>{expanded.countries?.join(", ")}</dd></>}
+                                </dl>
+                              )}
+                              {titleContext && <div className="title-context">
+                                <p className="synopsis-full">{titleContext.summary}</p>
+                                <p className="context-credit"><a href={titleContext.url} target="_blank" rel="noreferrer">Wikipedia</a>
+                                  {" · "}<a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer">CC BY-SA 4.0</a></p>
+                              </div>}
+                            </>}
+                          </div>
+                          {front && drag !== 0 && (
+                            <div
+                              className={`swipe-indicator ${drag > 0 ? "yes" : "no"}`}
+                            >
+                              {drag > 0 ? "Save" : "Dismiss"}
+                            </div>
                           )}
-                          {titleContext && <div className="title-context">
-                            <p className="synopsis-full">{titleContext.summary}</p>
-                            <p className="context-credit"><a href={titleContext.url} target="_blank" rel="noreferrer">Wikipedia</a>
-                              {" · "}<a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer">CC BY-SA 4.0</a></p>
-                          </div>}
-                        </>}
-                      </div>
-                      {drag !== 0 && (
-                        <div
-                          className={`swipe-indicator ${drag > 0 ? "yes" : "no"}`}
-                        >
-                          {drag > 0 ? "Save" : "Dismiss"}
-                        </div>
-                      )}
-                    </article>
+                        </article>
+                      );
+                    })}
                   </div>
                   <div className="actions" aria-label="Movie actions">
                     <button
@@ -835,26 +882,18 @@ export default function App() {
                       {filterError ? "Retry" : "Search next batch"}
                     </button>
                   )}
-                  {entries.some((e) => e.status === "dismissed") && (
+                  {!hasFilters && catalogState && (
                     <button
                       className="primary"
-                      disabled={busy}
+                      disabled={busy || deckLoading}
                       onClick={async () => {
-                        setBusy(true);
-                        try {
-                          await revisitDismissed();
-                          await refresh();
-                        } catch {
-                          setError(
-                            "Could not revisit passed titles. Please try again.",
-                          );
-                        } finally {
-                          setBusy(false);
-                        }
+                        setDeckLoading(true);
+                        try { await refill(entries, movies, true, true); }
+                        finally { setDeckLoading(false); }
                       }}
                     >
                       <RotateCcw size={16} aria-hidden="true" />
-                      Revisit dismissed films
+                      {deckLoading ? "Finding titles…" : "Find more titles"}
                     </button>
                   )}
                 </div>
@@ -921,7 +960,7 @@ export default function App() {
                         >
                           <Star size={16} aria-hidden="true" /> Rate
                         </button>
-                        {!entries.some((e) => e.movieId === movie.id) && (
+                        {!entries.some((e) => localTitleId(e.movieId) === movieKey(movie)) && (
                           <button
                             disabled={busy}
                             aria-label={`Save ${movie.title} to watchlist`}
@@ -932,12 +971,12 @@ export default function App() {
                           </button>
                         )}
                       </div>
-                      {!entries.some((e) => e.movieId === movie.id) && (
+                      {!entries.some((e) => localTitleId(e.movieId) === movieKey(movie)) && (
                         <button
                           className="recommendation-discover"
                           onClick={() => {
                             void ensureTitle(movie).then((title) => mergeTitles([title])).catch(() => {});
-                            setActiveId(movie.id);
+                            setActiveId(movieKey(movie));
                             setPage("discover");
                           }}
                         >
@@ -984,13 +1023,13 @@ export default function App() {
                       <div className="personal-rating">
                         <StarDisplay
                           rating={
-                            entries.find((e) => e.movieId === movie.id)
+                            entries.find((e) => localTitleId(e.movieId) === movieKey(movie))
                               ?.rating ?? 0
                           }
                         />
                         <span>
                           {(
-                            (entries.find((e) => e.movieId === movie.id)
+                            (entries.find((e) => localTitleId(e.movieId) === movieKey(movie))
                               ?.rating ?? 0) / 2
                           ).toLocaleString(undefined, {
                             maximumFractionDigits: 2,

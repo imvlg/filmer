@@ -37,6 +37,13 @@ const saved = (id: string): Entry => ({
   updatedAt: 1,
 });
 describe("taste-based ranking", () => {
+  it("excludes a passed IMDb title even when the feed uses the demo alias", () => {
+    const old = { ...arrival, id: "demo:grand-budapest", imdbId: "tt2278388" };
+    const online = { ...old, id: "tt2278388" };
+    expect(recommend([old, online, inception], []).map(({ movie }) => movie.id)).toHaveLength(2);
+    const passed: Entry = { movieId: "tt2278388", status: "dismissed", updatedAt: 1 };
+    expect(recommend([old, online, inception], [passed]).map(({ movie }) => movie.id)).toEqual([inception.id]);
+  });
   it("changes discovery after a like and finds both director and genre affinity", () => {
     const ranked = recommend(
       [comedy, arrival, inception, interstellar],

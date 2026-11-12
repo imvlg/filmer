@@ -19,6 +19,13 @@ describe("persistent title lifecycle", () => {
     await database.open();
     expect((await database.entries.get("movie:2"))?.status).toBe("dismissed");
   });
+  it("stores both catalog aliases under the same title", async () => {
+    await saveAction("TT2278388", "dismissed", undefined, database);
+    await saveAction("demo:grand-budapest", "watchlist", undefined, database);
+    expect(await database.entries.toArray()).toMatchObject([
+      { movieId: "demo:grand-budapest", status: "watchlist" },
+    ]);
+  });
   it("atomically moves saved titles to rated, edits ratings, and removes them", async () => {
     await saveAction("movie:3", "watchlist", undefined, database);
     await saveAction("movie:3", "rated", 8.5, database);

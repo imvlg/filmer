@@ -1,22 +1,18 @@
 import { catalog, type Movie } from "./catalog";
 import { db, type Entry } from "./db";
-import manifests from "./imdb-posters.json";
+import { imdbId, movieKey, localTitleId } from "./titleIdentity";
 import { buildTasteProfile } from "./recommendations";
 import { catalogPage, onlineStatus, searchOnline, titleDetails } from "./cinemeta";
 
-const legacy = new Map(Object.entries(manifests).map(([id, p]) => [p.imdbId, id]));
-export function imdbId(movie: Movie) {
-  return movie.imdbId ?? manifests[movie.id as keyof typeof manifests]?.imdbId ?? movie.id;
-}
 function normalize(movie: Movie): Movie {
-  const id = legacy.get(movie.id) ?? movie.id;
+  const id = movieKey(movie);
   const original = catalog.find((m) => m.id === id);
-  return { ...original, ...movie, id, imdbId: movie.imdbId ?? movie.id,
+  return { ...original, ...movie, id, imdbId: imdbId(movie),
     synopsis: movie.synopsis || original?.synopsis || "",
     director: movie.director || original?.director || "" };
 }
 async function cache(titles: Movie[]) {
-  const normalized = titles.map(normalize);
+  const normalized = [...new Map(titles.map(normalize).map((movie) => [movie.id, movie])).values()];
   const previous = await db.titles.bulkGet(normalized.map((m) => m.id));
   const merged = normalized.map((m, i) => {
     const old = previous[i];
@@ -59,7 +55,7 @@ export async function initialCatalog(_entries: Entry[]) {
   const popular = await Promise.allSettled([catalogPage("movie"), catalogPage("series")]);
   for (const result of popular) if (result.status === "fulfilled") fresh.push(...result.value);
   const fetched = await cache(fresh);
-  return [...new Map([...catalog, ...cached, ...fetched].map((m) => [m.id, m])).values()];
+  return [...new Map([...catalog, ...cached, ...fetched].map(normalize).map((m) => [m.id, m])).values()];
 }
 export async function enrichSavedTitles(entries: Entry[], movies: Movie[], onBatch: (titles: Movie[]) => void) {
   // Resolve legacy titles in background; even an offline service cannot block startup.
@@ -83,19 +79,20 @@ export async function searchCatalog(query: string, offset = 0) {
 }
 const genreNames = new Map(["Action", "Adventure", "Animation", "Biography", "Comedy", "Crime", "Documentary", "Drama", "Family", "Fantasy", "History", "Horror", "Mystery", "Romance", "Sci-Fi", "Sport", "Thriller", "War", "Western"].map((g) => [g.toLowerCase(), g]));
 const pageOffsets = new Map<string, number>();
-export async function moreCandidates(movies: Movie[], entries: Entry[]) {
+export async function moreCandidates(movies: Movie[], entries: Entry[], advance = false) {
   const profile = buildTasteProfile(movies, entries);
   const genres = Object.entries(profile.genres).filter(([, weight]) => weight > 0)
     .sort((a, b) => b[1] - a[1]).slice(0, 3).map(([genre]) => genreNames.get(genre)).filter((g): g is string => Boolean(g));
-  const excluded = new Set(entries.map((e) => e.movieId));
+  const excluded = new Set(entries.map((e) => localTitleId(e.movieId)));
   // Keep a general lane alongside the preferred genres so new tastes can surface.
   const tasks = [undefined, ...genres].flatMap((genre) =>
     (["movie", "series"] as const).map(async (type) => {
       const key = `${type}:${genre ?? "popular"}`;
-      let skip = pageOffsets.get(key) ?? 0;
+      let skip = (pageOffsets.get(key) ?? 0) + (advance ? 50 : 0);
       let titles = await catalogPage(type, { genre, skip });
+      pageOffsets.set(key, skip);
       // Advance in 50-title source pages once the visible batch is mostly consumed.
-      if (titles.length && titles.filter((m) => !excluded.has(normalize(m).id)).length < 15) {
+      if (!advance && titles.length && titles.filter((m) => !excluded.has(movieKey(m))).length < 15) {
         skip += 50;
         titles = await catalogPage(type, { genre, skip });
         pageOffsets.set(key, skip);
@@ -106,7 +103,7 @@ export async function moreCandidates(movies: Movie[], entries: Entry[]) {
   const results = await Promise.allSettled(tasks);
   const successful = results.filter((r): r is PromiseFulfilledResult<Movie[]> => r.status === "fulfilled");
   if (!successful.length) throw new Error("Online discovery is unavailable");
-  return cache(successful.flatMap((r) => r.value));
+  return cache(successful.flatMap((r) => r.value).filter((movie) => !excluded.has(movieKey(movie))));
 }
 
 export async function discoverPage(

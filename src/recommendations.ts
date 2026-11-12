@@ -1,5 +1,6 @@
 import type { Movie } from "./catalog";
 import type { Entry } from "./db";
+import { localTitleId, movieKey } from "./titleIdentity";
 
 type Scores = Record<string, number>;
 const weights = {
@@ -61,10 +62,10 @@ function features(movie: Movie): Features {
 }
 
 function affinity(entries: Entry[], movies: Movie[]) {
-  const byId = new Map(movies.map((movie) => [movie.id, movie]));
+  const byId = new Map(movies.map((movie) => [movieKey(movie), movie]));
   const latest = entries.reduce((time, entry) => Math.max(time, entry.updatedAt), 0);
   return entries.flatMap((entry) => {
-    const movie = byId.get(entry.movieId);
+    const movie = byId.get(localTitleId(entry.movieId));
     if (!movie) return [];
     const raw = entry.status === "watchlist" ? .72 : entry.status === "dismissed" ? -.2 :
       Math.max(-1.8, Math.min(2.25, ((entry.rating ?? 5.5) - 5.5) / 2));
@@ -111,13 +112,14 @@ export function recommend(movies: Movie[], entries: Entry[], limit = 200, histor
   const feedback = affinity(entries, historyPool);
   const profile = profileFrom(feedback);
   const anchors = [...feedback].sort((a, b) => Math.abs(b.signal) - Math.abs(a.signal)).slice(0, 14);
-  const excluded = new Set(entries.map((entry) => entry.movieId));
+  const excluded = new Set(entries.map((entry) => localTitleId(entry.movieId)));
   const frequencies = new Map<string, number>();
   for (const movie of movies) {
     for (const genre of features(movie).genres) frequencies.set(genre, (frequencies.get(genre) ?? 0) + 1);
   }
 
-  const remaining = movies.filter((movie) => !excluded.has(movie.id)).map((movie) => {
+  const candidates = new Map(movies.map((movie) => [movieKey(movie), movie]));
+  const remaining = [...candidates].filter(([id]) => !excluded.has(id)).map(([, movie]) => {
     const feature = features(movie);
     let score = 0;
     for (const facet of facets) {

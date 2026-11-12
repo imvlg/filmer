@@ -27,3 +27,19 @@ it("upgrades version 1 without changing existing ratings, watchlist or history",
   expect(await next.titles.count()).toBe(0);
   await next.delete();
 });
+
+it("merges an older IMDb alias without discarding the newer Pass", async () => {
+  const name = "filmer-alias-migration-test";
+  const original = new Dexie(name);
+  original.version(2).stores({ entries: "&movieId,status,updatedAt", history: "++id,movieId,at", titles: "&id,imdbId" });
+  await original.table("entries").bulkPut([
+    { movieId: "demo:grand-budapest", status: "watchlist", updatedAt: 10 },
+    { movieId: "tt2278388", status: "dismissed", updatedAt: 20 },
+  ]);
+  original.close();
+  const upgraded = new FilmerDB(name);
+  expect(await upgraded.entries.toArray()).toEqual([
+    { movieId: "demo:grand-budapest", status: "dismissed", updatedAt: 20 },
+  ]);
+  await upgraded.delete();
+});

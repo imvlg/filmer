@@ -1,5 +1,6 @@
 import Dexie, { type Table } from "dexie";
 import type { Movie } from "./catalog";
+import { localTitleId } from "./titleIdentity";
 export type Status = "watchlist" | "rated" | "dismissed";
 export interface Entry {
   movieId: string;
@@ -25,6 +26,22 @@ export class FilmerDB extends Dexie {
       history: "++id,movieId,at",
     });
     this.version(2).stores({ titles: "&id,imdbId" });
+    this.version(3).stores({ entries: "&movieId,status,updatedAt" }).upgrade(async (transaction) => {
+      const table = transaction.table<Entry, string>("entries");
+      const existing = await table.toArray();
+      const canonical = new Map<string, Entry>();
+      const aliases = [];
+      for (const entry of existing) {
+        const movieId = localTitleId(entry.movieId);
+        if (movieId !== entry.movieId) aliases.push(entry.movieId);
+        const previous = canonical.get(movieId);
+        if (!previous || previous.updatedAt <= entry.updatedAt) canonical.set(movieId, { ...entry, movieId });
+      }
+      if (aliases.length) {
+        await table.bulkPut([...canonical.values()]);
+        await table.bulkDelete(aliases);
+      }
+    });
   }
 }
 export const db = new FilmerDB();
@@ -42,51 +59,39 @@ export async function saveAction(
       (rating! * 2) % 1 !== 0)
   )
     throw new Error("Choose a rating from 1 to 10 in half-star steps.");
-  await database.transaction(
+  const id = localTitleId(movieId);
+  return database.transaction(
     "rw",
     database.entries,
     database.history,
     async () => {
       const at = Date.now();
-      await database.entries.put({
-        movieId,
+      const entry: Entry = {
+        movieId: id,
         status,
         ...(status === "rated" ? { rating } : {}),
         updatedAt: at,
-      });
+      };
+      await database.entries.put(entry);
       await database.history.add({
-        movieId,
+        movieId: id,
         action: status,
         ...(status === "rated" ? { rating } : {}),
         at,
       });
+      return entry;
     },
   );
 }
 export async function removeEntry(movieId: string, database = db) {
+  const id = localTitleId(movieId);
   await database.transaction(
     "rw",
     database.entries,
     database.history,
     async () => {
-      await database.entries.delete(movieId);
-      await database.history.add({ movieId, action: "remove", at: Date.now() });
+      await database.entries.delete(id);
+      await database.history.add({ movieId: id, action: "remove", at: Date.now() });
     },
   );
-}
-export async function revisitDismissed() {
-  await db.transaction("rw", db.entries, db.history, async () => {
-    const entries = await db.entries
-      .where("status")
-      .equals("dismissed")
-      .toArray();
-    await db.entries.bulkDelete(entries.map((e) => e.movieId));
-    await db.history.bulkAdd(
-      entries.map((e) => ({
-        movieId: e.movieId,
-        action: "reset-dismissed" as const,
-        at: Date.now(),
-      })),
-    );
-  });
 }
