@@ -30,15 +30,15 @@ export function cardTheme(id?: string): CSSProperties {
       "12px 12px",
     ],
     [
-      "repeating-linear-gradient(90deg,#fff9ed55 0 1px,transparent 1px 8px)",
+      "repeating-linear-gradient(90deg,#fff9ed62 0 3px,transparent 3px 13px)",
       "auto",
     ],
     [
-      "repeating-linear-gradient(45deg,#fff9ed55 0 1px,transparent 1px 10px)",
+      "repeating-linear-gradient(45deg,#fff9ed63 0 3px,transparent 3px 15px)",
       "auto",
     ],
     [
-      "linear-gradient(90deg,#fff9ed44 1px,transparent 1px),linear-gradient(#fff9ed44 1px,transparent 1px)",
+      "linear-gradient(90deg,#fff9ed55 2px,transparent 2px),linear-gradient(#fff9ed55 2px,transparent 2px)",
       "18px 18px,18px 18px",
     ],
     ["radial-gradient(circle,#fff9ed77 0 1.6px,transparent 2px)", "19px 19px"],

@@ -60,7 +60,7 @@ export default function RatingStars({
       role="slider"
       tabIndex={disabled ? -1 : 0}
       aria-label="Your rating"
-      aria-valuemin={0.5}
+      aria-valuemin={0}
       aria-valuemax={5}
       aria-valuenow={value / 2}
       aria-valuetext={`${value / 2} out of 5 stars`}
@@ -71,8 +71,8 @@ export default function RatingStars({
         if (event.key === "ArrowRight" || event.key === "ArrowUp")
           next = Math.min(10, Math.floor(value) + 1);
         else if (event.key === "ArrowLeft" || event.key === "ArrowDown")
-          next = Math.max(1, Math.ceil(value) - 1);
-        else if (event.key === "Home") next = 1;
+          next = Math.max(0, Math.ceil(value) - 1);
+        else if (event.key === "Home") next = 0;
         else if (event.key === "End") next = 10;
         else return;
         event.preventDefault();

@@ -28,6 +28,10 @@ async function cache(titles: Movie[]) {
       director: m.director || old.director,
       directors: m.directors?.length ? m.directors : old.directors,
       directorIds: m.directorIds?.length ? m.directorIds : old.directorIds,
+      cast: m.cast?.length ? m.cast : old.cast ?? m.cast,
+      countries: m.countries?.length ? m.countries : old.countries,
+      languages: m.languages?.length ? m.languages : old.languages,
+      keywords: m.keywords?.length ? m.keywords : old.keywords,
       synopsis: m.synopsis || old.synopsis,
       runtime: m.runtime || old.runtime,
       metadataComplete: m.metadataComplete || old.metadataComplete,
@@ -38,7 +42,7 @@ async function cache(titles: Movie[]) {
 }
 export async function ensureTitle(movie: Movie) {
   const known = await db.titles.get(movie.id) ?? movie;
-  if (known.metadataComplete) return known;
+  if (known.metadataComplete && Array.isArray(known.cast)) return known;
   try {
     const detailed = await titleDetails(imdbId(known), known.mediaType === "tv" ? "series" : "movie");
     if (detailed) return (await cache([detailed]))[0];
@@ -63,7 +67,7 @@ export async function enrichSavedTitles(entries: Entry[], movies: Movie[], onBat
   for (let i = 0; i < lookup.length; i += 4) {
     const found = await Promise.allSettled(lookup.slice(i, i + 4).map(async (id) => {
       const known = movies.find((m) => imdbId(m) === id);
-      if (known?.directors?.length && known.posterUrl) return known;
+      if (known?.metadataComplete && Array.isArray(known.cast)) return known;
       return titleDetails(id, known?.mediaType === "tv" ? "series" : "movie");
     }));
     const batch = found.flatMap((result) => result.status === "fulfilled" && result.value ? [result.value] : []);
@@ -84,7 +88,8 @@ export async function moreCandidates(movies: Movie[], entries: Entry[]) {
   const genres = Object.entries(profile.genres).filter(([, weight]) => weight > 0)
     .sort((a, b) => b[1] - a[1]).slice(0, 3).map(([genre]) => genreNames.get(genre)).filter((g): g is string => Boolean(g));
   const excluded = new Set(entries.map((e) => e.movieId));
-  const tasks = (genres.length ? genres : [undefined]).flatMap((genre) =>
+  // Keep a general lane alongside the preferred genres so new tastes can surface.
+  const tasks = [undefined, ...genres].flatMap((genre) =>
     (["movie", "series"] as const).map(async (type) => {
       const key = `${type}:${genre ?? "popular"}`;
       let skip = pageOffsets.get(key) ?? 0;

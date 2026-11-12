@@ -1802,3 +1802,158 @@ button.discover-poster {
     to { opacity: 1; transform: translateY(0) scale(1); }
   }
 }
+
+/* Transform only the card while the pointer moves. */
+.movie-card {
+  transform: translate3d(var(--drag-x, 0px), 0, 0) rotate(var(--drag-angle, 0deg));
+  transition: transform 260ms cubic-bezier(.2, .85, .27, 1), opacity 240ms ease;
+}
+.movie-card[data-swiping] { transition: none; }
+.movie-card.exiting {
+  transform: translate3d(var(--exit-x), 0, 0) rotate(var(--exit-angle));
+  opacity: 0;
+  transition: transform 280ms cubic-bezier(.18, .72, .28, 1), opacity 280ms ease-in;
+}
+.movie-card, .movie-card *, .rating-dialog, .rating-dialog * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.collection-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.collection-controls button:last-child:not(.collection-icon-button) {
+  width: auto;
+  padding: 8px 12px;
+}
+.collection-controls button.collection-icon-button {
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+}
+.collection-icon-button svg { display: block; flex: none; }
+.collection-info {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.collection-info h2 { overflow-wrap: anywhere; }
+.recommendation-discover { align-self: flex-start; min-height: 32px; text-align: left; }
+@media (max-width: 640px) {
+  .app { --mobile-nav-height: calc(53px + env(safe-area-inset-bottom)); }
+  .sidebar {
+    inset: auto 0 0;
+    width: 100%;
+    height: var(--mobile-nav-height);
+    border-radius: 16px 16px 0 0;
+    padding: 0 5px env(safe-area-inset-bottom);
+    background-color: #35574e;
+  }
+  .sidebar nav { height: 52px; }
+  .sidebar .nav-item { padding: 4px 0; gap: 1px; min-height: 44px; font-size: 11px; }
+  .sidebar .nav-icon { height: 23px; }
+  .nav-selection { top: 3px; height: 46px; border-radius: 13px; }
+  .main { padding-bottom: calc(var(--mobile-nav-height) + 10px); }
+  main:has(.discovery) {
+    height: calc(100svh - var(--mobile-header-h) - var(--mobile-nav-height));
+    min-height: calc(100svh - var(--mobile-header-h) - var(--mobile-nav-height));
+    padding-bottom: 14px;
+  }
+  .toast { bottom: calc(var(--mobile-nav-height) + 12px); }
+  .collection { gap: 11px 10px; }
+  .page-heading:not(.discovery-heading) { margin-bottom: 12px; }
+  .collection-info { padding: 9px 10px 10px; }
+  .collection-info h2 { line-height: 1.24; }
+  .collection-info .metadata, .collection-info .genres { margin-top: 3px; line-height: 1.3; }
+  .collection-info .personal-rating { margin-top: 6px; }
+  .collection-controls { margin-top: 6px; gap: 5px; }
+  .collection-controls button { min-height: 38px; }
+  .collection-controls button.collection-icon-button { width: 38px; min-width: 38px; min-height: 38px; }
+  .recommendation-discover { padding: 4px 0; min-height: 26px; line-height: 1.25; }
+  .catalog-status, .search-status { line-height: 1.35; margin-bottom: 9px; }
+  .catalog-search { gap: 5px; margin-bottom: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .movie-card, .movie-card.exiting { transition: none; }
+}
+
+.title-credits {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 11px;
+  margin: 13px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.expanded-movie-info { padding-inline: clamp(13px, 2vw, 21px); }
+.title-credits dt { color: var(--teal); font-weight: 600; }
+.title-credits dd { margin: 0; overflow-wrap: anywhere; }
+.title-context {
+  margin-top: 14px;
+  padding-top: 2px;
+  border-top: 1px solid #96633e40;
+}
+.context-credit { margin-top: 8px; font-size: 11px; color: #775e4a; }
+.context-credit a { color: inherit; text-underline-offset: 2px; }
+
+/* Reflections sit above the ink and under the active card. */
+.card-stage::before {
+  --sleeve-pattern: var(--card-pattern-a);
+  --sleeve-pattern-size: var(--card-pattern-size-a);
+}
+.card-stage::after {
+  --sleeve-pattern: var(--card-pattern-b);
+  --sleeve-pattern-size: var(--card-pattern-size-b);
+}
+.card-stage::before, .card-stage::after {
+  background-image:
+    linear-gradient(116deg, transparent 34%, #fff0bb20 45%, #fffdf370 51%, #fff5d820 57%, transparent 68%),
+    var(--sleeve-pattern),
+    linear-gradient(150deg, #fff5dd66, transparent 45%, #67413038 100%);
+  background-size: 245% 100%, var(--sleeve-pattern-size), 100% 100%;
+  background-position: 55% 0, 0 0, 0 0, 0 0;
+  box-shadow: inset 0 1px 1px #fffcdfb0, inset 0 -3px 4px #5f36172e, 0 7px 17px #5f36172b;
+}
+.movie-card {
+  box-shadow: 0 18px 40px #744c2527, 0 4px 10px #67432616, inset 0 1px 0 #fff8ed;
+}
+.collection-card {
+  box-shadow: 0 8px 22px #64472513, inset 0 1px 0 #fff9e8;
+}
+@media (min-width: 641px) {
+  .sidebar {
+    background-image:
+      radial-gradient(ellipse at 12% 12%, #d6b98b26 0, transparent 55%),
+      linear-gradient(125deg, #284e45 6%, #456e62 30%, #546d58 51%, #695447 72%, #294b43 96%);
+    background-size: 170% 170%, 260% 260%;
+    background-position: 0 0, 23% 50%;
+    box-shadow: inset 0 1px 0 #dbd0a86b, 0 14px 35px #28413731;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes sleeve-reflection {
+    0%, 15%, 100% { background-position: 100% 0, 0 0, 0 0, 0 0; }
+    62%, 75% { background-position: 6% 0, 0 0, 0 0, 0 0; }
+  }
+  .collection-card {
+    transition: box-shadow 200ms ease, transform 200ms ease;
+  }
+  @media (hover: hover) {
+    .collection-card:hover { transform: translateY(-3px); box-shadow: 0 12px 27px #64472525; }
+  }
+  @media (min-width: 641px) {
+    .card-stage::before { animation: sleeve-reflection 12s ease-in-out infinite; }
+    .card-stage::after { animation: sleeve-reflection 12s ease-in-out -3s infinite; }
+    .card-stage:has(.movie-card[data-swiping], .movie-card.exiting)::before,
+    .card-stage:has(.movie-card[data-swiping], .movie-card.exiting)::after { animation-play-state: paused; }
+    .sidebar { animation: sidebar-colors 26s ease-in-out infinite alternate; }
+    @keyframes sidebar-colors {
+      from { background-position: 0 0, 4% 50%; }
+      to { background-position: 66% 48%, 94% 50%; }
+    }
+  }
+}

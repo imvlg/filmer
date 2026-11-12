@@ -13,12 +13,21 @@ export interface Meta {
   genres?: string[];
   genre?: string[];
   director?: string[] | string;
+  cast?: string[] | string;
+  country?: string[] | string;
+  language?: string[] | string;
+  keywords?: string[] | string;
   description?: string;
   runtime?: string;
   poster?: string;
   imdbRating?: string;
 }
 const requests = new Map<string, Promise<{ metas?: Meta[]; meta?: Meta; id?: string }>>();
+function textList(value?: string | string[]) {
+  return (Array.isArray(value) ? value : typeof value === "string" ? value.split(/[,;]/) : [])
+    .filter((item) => typeof item === "string" && item.trim())
+    .map((item) => item.trim());
+}
 async function request(path: string) {
   let pending = requests.get(path);
   if (!pending) {
@@ -46,6 +55,10 @@ export function toMovie(meta: Meta): Movie | null {
     title: meta.name, year: year || null, genres: meta.genres ?? meta.genre ?? [],
     director: Array.isArray(meta.director) ? meta.director.join(", ") : meta.director ?? "",
     directors: Array.isArray(meta.director) ? meta.director : meta.director ? [meta.director] : [],
+    cast: textList(meta.cast).slice(0, 8),
+    countries: textList(meta.country),
+    languages: textList(meta.language),
+    keywords: textList(meta.keywords),
     synopsis: meta.description ?? "", runtime: meta.runtime ?? "",
     palette: ["#d3b896", "#ead8bb", "#657e73"], art: "city",
     ...(trustedPoster ? { posterUrl: poster } : {}),

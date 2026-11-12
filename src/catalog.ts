@@ -12,6 +12,9 @@ export interface Movie {
   imdbId?: string;
   directorIds?: string[];
   directors?: string[];
+  cast?: string[];
+  countries?: string[];
+  languages?: string[];
   posterUrl?: string;
   metadataComplete?: boolean;
   keywords?: string[];

@@ -97,4 +97,22 @@ describe("taste-based ranking", () => {
       result.slice(0, 4).some((r) => r.movie.id === "space-by-other"),
     ).toBe(true);
   });
+  it("matches different wording for the same plot theme across directors", () => {
+    const watched = { ...interstellar, synopsis: "Astronauts discover a wormhole.", keywords: [] };
+    const related = { ...arrival, synopsis: "A spacecraft sets off for an alien planet.", keywords: [] };
+    const unrelated = { ...arrival, id: "other-drama", synopsis: "A lawyer faces a difficult choice.", keywords: [] };
+    const results = recommend([unrelated, related], [{ ...saved(watched.id), status: "rated", rating: 10 }], 2, [watched]);
+    expect(results[0].movie.id).toBe(related.id);
+  });
+  it("uses cast affinity and weighs recent explicit feedback more heavily", () => {
+    const older = { ...interstellar, cast: ["Actor A"] };
+    const recent = { ...interstellar, id: "recent", cast: ["Actor B"] };
+    const a = { ...arrival, cast: ["Actor A"] };
+    const b = { ...arrival, id: "candidate-b", cast: ["Actor B"] };
+    const history: Entry[] = [
+      { ...saved(older.id), status: "rated", rating: 10 },
+      { ...saved(recent.id), status: "rated", rating: 10, updatedAt: 365 * 86_400_000 },
+    ];
+    expect(recommend([a, b], history, 2, [older, recent])[0].movie.id).toBe(b.id);
+  });
 });

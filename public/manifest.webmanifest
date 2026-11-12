@@ -1,0 +1,16 @@
+{
+  "id": "./",
+  "name": "filmer",
+  "short_name": "filmer",
+  "description": "Discover, save, and rate films and TV series.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "theme_color": "#f7ebdd",
+  "background_color": "#f7ebdd",
+  "icons": [
+    { "src": "icons/filmer-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/filmer-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/filmer-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

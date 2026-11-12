@@ -24,11 +24,13 @@ import {
   initialCatalog,
   enrichSavedTitles,
   ensureTitle,
+  imdbId,
   moreCandidates,
   searchCatalog,
   type CatalogStatus,
 } from "./catalogService";
 import { buildTasteProfile, recommend } from "./recommendations";
+import { getTitleContext, type TitleContext } from "./titleContext";
 import {
   db,
   saveAction,
@@ -92,7 +94,7 @@ export default function App() {
   const lock = useRef(false);
   const actionButtons = useRef<Partial<Record<Status, HTMLButtonElement>>>({});
   const [ratingMovie, setRatingMovie] = useState<Movie | null>(null);
-  const [rating, setRating] = useState(7);
+  const [rating, setRating] = useState(0);
   const modal = useRef<HTMLDialogElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -111,9 +113,12 @@ export default function App() {
   const [filterRetry, setFilterRetry] = useState(0);
   const [filterEnd, setFilterEnd] = useState(false);
   const [details, setDetails] = useState<Movie | null>(null);
+  const [titleContext, setTitleContext] = useState<TitleContext | null>(null);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [drag, setDrag] = useState(0);
-  const [exit, setExit] = useState(0);
+  const cardNode = useRef<HTMLElement>(null);
+  const dragFrame = useRef<number | null>(null);
+  const [departureCard, setDepartureCard] = useState<{ id: string; direction: number } | null>(null);
   const pointer = useRef<{ id: number; x: number; y: number; scrollable: boolean; moved: boolean } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ranked = useMemo(() => recommend(movies, entries), [movies, entries]);
@@ -126,15 +131,16 @@ export default function App() {
   const invalidYears = Boolean(firstYear && lastYear && firstYear > lastYear);
   const filterByYear = !invalidYears && Boolean(firstYear || lastYear);
   const hasFilters = Boolean(titleFilter.trim() || genreFilter || typeFilter || minimumRating || filterByYear);
-  function matchesFilters(movie: Movie) {
-    return (!titleFilter.trim() || movie.title.toLocaleLowerCase().includes(titleFilter.trim().toLocaleLowerCase())) &&
+  const discoverPool = useMemo(() => hasFilters ? movies.filter((movie) =>
+    (!titleFilter.trim() || movie.title.toLocaleLowerCase().includes(titleFilter.trim().toLocaleLowerCase())) &&
       (!genreFilter || movie.genres.includes(genreFilter)) &&
       (!typeFilter || movie.mediaType === typeFilter) &&
       (!minimumRating || (movie.publicRating?.value ?? 0) >= Number(minimumRating)) &&
-      (!filterByYear || (movie.year !== null && (!firstYear || movie.year >= firstYear) && (!lastYear || movie.year <= lastYear)));
-  }
-  const discoverPool = hasFilters ? movies.filter(matchesFilters) : movies;
-  const discoverRanked = hasFilters && discoverOrder === "recommended" ? recommend(discoverPool, entries) : ranked;
+      (!filterByYear || (movie.year !== null && (!firstYear || movie.year >= firstYear) && (!lastYear || movie.year <= lastYear)))
+    ) : movies, [movies, hasFilters, titleFilter, genreFilter, typeFilter, minimumRating, filterByYear, firstYear, lastYear]);
+  const discoverRanked = useMemo(() => hasFilters && discoverOrder === "recommended"
+    ? recommend(discoverPool, entries, 200, movies) : ranked,
+    [discoverPool, entries, movies, ranked, hasFilters, discoverOrder]);
   const reviewed = new Set(entries.map((entry) => entry.movieId));
   const nextMovie = discoverOrder === "recommended" ? discoverRanked[0]?.movie :
     discoverPool.filter((movie) => !reviewed.has(movie.id)).sort((a, b) =>
@@ -143,6 +149,7 @@ export default function App() {
     )[0];
   const active =
     discoverPool.find((movie) => movie.id === activeId && !reviewed.has(movie.id)) ?? nextMovie;
+  const exit = departureCard?.id === active?.id ? departureCard?.direction ?? 0 : 0;
   const expandedDetails = details && details.id === active?.id ? details : null;
   useEffect(() => {
     if (active?.id !== activeId) setActiveId(active?.id ?? null);
@@ -186,8 +193,20 @@ export default function App() {
   useEffect(() => {
     setDetails(null);
   }, [active?.id, page]);
+  const contextId = expandedDetails ? imdbId(expandedDetails) : null;
+  useEffect(() => {
+    setTitleContext(null);
+    if (!contextId) return;
+    let current = true;
+    void getTitleContext(contextId).then((context) => {
+      if (current) setTitleContext(context);
+    });
+    return () => { current = false; };
+  }, [contextId]);
   useEffect(() => () => {
     if (pressTimer.current !== null) clearTimeout(pressTimer.current);
+    if (dragFrame.current !== null) cancelAnimationFrame(dragFrame.current);
+    dragFrame.current = null;
     pointer.current = null;
   }, [active?.id, page]);
   function toggleDetails(movie: Movie) {
@@ -354,7 +373,7 @@ export default function App() {
   function openRating(movie: Movie) {
     if (page === "discover") pulseAction("rated");
     opener.current = document.activeElement as HTMLElement;
-    setRating(entries.find((e) => e.movieId === movie.id)?.rating ?? 7);
+    setRating(entries.find((e) => e.movieId === movie.id)?.rating ?? 0);
     setRatingMovie(movie);
     void ensureTitle(movie).then((title) => mergeTitles([title])).catch(() => {});
   }
@@ -372,6 +391,12 @@ export default function App() {
     setBusy(true);
     setError("");
     try {
+      const departure = page === "discover" ? new Promise<void>((resolve) => {
+        setDepartureCard({ id: movie.id, direction: status === "dismissed" ? -1 : 1 });
+        timer.current = setTimeout(resolve,
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 280,
+        );
+      }) : Promise.resolve();
       await saveAction(movie.id, status, value);
       void ensureTitle(movie).then(async (title) => {
         mergeTitles([title]);
@@ -379,17 +404,7 @@ export default function App() {
         const pool = [...new Map([...movies, title].map((m) => [m.id, m])).values()];
         await refill(current, pool);
       }).catch(() => {});
-      if (page === "discover") {
-        setExit(status === "dismissed" ? -1 : 1);
-        await new Promise<void>((resolve) => {
-          timer.current = setTimeout(
-            resolve,
-            window.matchMedia("(prefers-reduced-motion: reduce)").matches
-              ? 0
-              : 230,
-          );
-        });
-      }
+      await departure;
       await refresh();
       if (page !== "discover") setActiveId(null);
       setRatingMovie(null);
@@ -405,8 +420,8 @@ export default function App() {
         "That change could not be saved. Your card is still here. Please try again.",
       );
     } finally {
-      setExit(0);
-      setDrag(0);
+      resetDrag();
+      setDepartureCard(null);
       setBusy(false);
       lock.current = false;
     }
@@ -461,22 +476,48 @@ export default function App() {
     if (pressTimer.current !== null) clearTimeout(pressTimer.current);
     pressTimer.current = null;
   }
-  function cancelGesture() {
+  function stopTracking() {
     clearPress();
     pointer.current = null;
+    if (dragFrame.current !== null) cancelAnimationFrame(dragFrame.current);
+    dragFrame.current = null;
+    cardNode.current?.removeAttribute("data-swiping");
+  }
+  function resetDrag() {
+    cardNode.current?.style.removeProperty("--drag-x");
+    cardNode.current?.style.removeProperty("--drag-angle");
     setDrag(0);
+  }
+  function cancelGesture() {
+    if (!pointer.current) return;
+    stopTracking();
+    resetDrag();
+  }
+  function moveCard(distance: number) {
+    if (dragFrame.current !== null) cancelAnimationFrame(dragFrame.current);
+    dragFrame.current = requestAnimationFrame(() => {
+      dragFrame.current = null;
+      const card = cardNode.current;
+      if (!card) return;
+      card.dataset.swiping = "true";
+      card.style.setProperty("--drag-x", `${distance}px`);
+      card.style.setProperty("--drag-angle", `${Math.max(-14, Math.min(14, distance / 30))}deg`);
+      setDrag(Math.abs(distance) > 25 ? Math.sign(distance) : 0);
+    });
   }
   function release(e: React.PointerEvent) {
     const start = pointer.current;
     if (!start || start.id !== e.pointerId) return;
-    cancelGesture();
-    if (!active || busy) return;
     const distance = e.clientX - start.x;
     const vertical = e.clientY - start.y;
-    if (!start.scrollable && Math.abs(distance) > 90 && Math.abs(distance) > Math.abs(vertical))
+    stopTracking();
+    if (active && !busy && !start.scrollable && Math.abs(distance) > 90 && Math.abs(distance) > Math.abs(vertical)) {
       void act(active, distance > 0 ? "watchlist" : "dismissed");
-    else if (!start.moved && Math.hypot(distance, vertical) <= 9)
-      toggleDetails(active);
+    } else {
+      resetDrag();
+      if (active && !busy && !start.moved && Math.hypot(distance, vertical) <= 9)
+        toggleDetails(active);
+    }
   }
   function resetFilterPage() {
     setFilterPage(0);
@@ -634,14 +675,17 @@ export default function App() {
                   <div className="card-stage">
                     <article
                       key={active.id}
+                      ref={cardNode}
                       className={`movie-card ${exit ? "exiting" : ""}`}
                       data-description-open={Boolean(expandedDetails)}
                       style={{
-                        transform: `translateX(${exit ? exit * 600 : drag}px) rotate(${exit ? exit * 14 : drag / 25}deg)`,
-                        opacity: exit ? 0 : 1,
-                      }}
+                        "--exit-x": exit < 0 ? "calc(-100vw - 120px)" : "calc(100vw + 120px)",
+                        "--exit-angle": `${exit * 14}deg`,
+                      } as CSSProperties}
                       onPointerDown={(e) => {
                         if (busy || !e.isPrimary || e.button !== 0) return;
+                        if (e.target instanceof Element && e.target.closest("a")) return;
+                        if (e.pointerType === "touch") e.preventDefault();
                         const scrollable = e.target instanceof Element && Boolean(e.target.closest(".expanded-movie-info"));
                         const pointerId = e.pointerId;
                         clearPress();
@@ -655,6 +699,7 @@ export default function App() {
                         pressTimer.current = setTimeout(() => {
                           if (pointer.current?.id !== pointerId) return;
                           cancelGesture();
+                          window.getSelection()?.removeAllRanges();
                           openRating(active);
                         }, 550);
                         if (!scrollable) e.currentTarget.setPointerCapture(pointerId);
@@ -668,13 +713,14 @@ export default function App() {
                           start.moved = true;
                           clearPress();
                         }
-                        if (!start.scrollable) setDrag(start.moved && Math.abs(x) > Math.abs(y) ? x : 0);
+                        if (!start.scrollable && Math.abs(x) > Math.abs(y)) moveCard(x);
                       }}
                       onPointerUp={release}
                       onPointerCancel={cancelGesture}
                       onLostPointerCapture={cancelGesture}
                       onPointerLeave={() => { if (pointer.current?.scrollable) cancelGesture(); }}
                       onContextMenu={(event) => event.preventDefault()}
+                      onCopy={(event) => event.preventDefault()}
                       onKeyDown={(e) => {
                         if (e.key === "Escape" && expandedDetails) {
                           e.preventDefault();
@@ -708,8 +754,22 @@ export default function App() {
                           {expandedDetails?.synopsis || active.synopsis ||
                             (expandedDetails?.metadataComplete ? "No description available." : "Loading description…")}
                         </p>
+                        {expandedDetails && <>
+                          {(expandedDetails.director || Boolean(expandedDetails.cast?.length) || Boolean(expandedDetails.countries?.length)) && (
+                            <dl className="title-credits">
+                              {expandedDetails.director && <><dt>Director</dt><dd>{expandedDetails.director}</dd></>}
+                              {Boolean(expandedDetails.cast?.length) && <><dt>Cast</dt><dd>{expandedDetails.cast?.slice(0, 5).join(", ")}</dd></>}
+                              {Boolean(expandedDetails.countries?.length) && <><dt>Country</dt><dd>{expandedDetails.countries?.join(", ")}</dd></>}
+                            </dl>
+                          )}
+                          {titleContext && <div className="title-context">
+                            <p className="synopsis-full">{titleContext.summary}</p>
+                            <p className="context-credit"><a href={titleContext.url} target="_blank" rel="noreferrer">Wikipedia</a>
+                              {" · "}<a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer">CC BY-SA 4.0</a></p>
+                          </div>}
+                        </>}
                       </div>
-                      {Math.abs(drag) > 25 && (
+                      {drag !== 0 && (
                         <div
                           className={`swipe-indicator ${drag > 0 ? "yes" : "no"}`}
                         >
@@ -725,7 +785,7 @@ export default function App() {
                         if (node) actionButtons.current.dismissed = node;
                         else delete actionButtons.current.dismissed;
                       }}
-                      data-swipe-preview={drag < -24 ? "true" : undefined}
+                      data-swipe-preview={drag < 0 ? "true" : undefined}
                       disabled={busy}
                       aria-label="Dismiss"
                       title="Dismiss (Left arrow)"
@@ -752,7 +812,7 @@ export default function App() {
                         if (node) actionButtons.current.watchlist = node;
                         else delete actionButtons.current.watchlist;
                       }}
-                      data-swipe-preview={drag > 24 ? "true" : undefined}
+                      data-swipe-preview={drag > 0 ? "true" : undefined}
                       disabled={busy}
                       aria-label="Save to watchlist"
                       title="Save to watchlist (Right arrow)"
@@ -865,6 +925,7 @@ export default function App() {
                           <button
                             disabled={busy}
                             aria-label={`Save ${movie.title} to watchlist`}
+                            className="collection-icon-button"
                             onClick={() => void act(movie, "watchlist")}
                           >
                             <Heart size={17} aria-hidden="true" />
@@ -946,6 +1007,7 @@ export default function App() {
                         disabled={busy}
                         aria-label={`Remove ${movie.title} ${page === "rated" ? "rating" : "from watchlist"}`}
                         title="Remove"
+                        className="collection-icon-button"
                         onClick={() => void remove(movie)}
                       >
                         <Trash2 size={17} aria-hidden="true" />
@@ -988,6 +1050,7 @@ export default function App() {
         }}
         aria-labelledby="rating-title"
         aria-describedby="rating-movie"
+        className="rating-dialog"
       >
         <div className="modal-inner">
           {ratingMovie && (
@@ -1014,7 +1077,7 @@ export default function App() {
             </button>
             <button
               className="primary"
-              disabled={busy}
+              disabled={busy || rating === 0}
               onClick={() =>
                 ratingMovie && void act(ratingMovie, "rated", rating)
               }
